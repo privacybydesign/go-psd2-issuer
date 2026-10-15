@@ -1,0 +1,41 @@
+services:
+  psd2-issuer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: psd2-issuer
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./local-secrets/psd2-issuer:/secrets
+    restart: unless-stopped
+    networks:
+      - app_network
+    depends_on: [redis]
+
+  irma:
+    build:
+      # downloading and building, because the prebuilt one may not match our local arch
+      context: https://github.com/privacybydesign/irmago.git
+      dockerfile: Dockerfile
+    container_name: psd2-irma-server
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./local-secrets/irma-server:/config
+    # the image's entrypoint is the yivi toolkit; the IRMA server is `yivi irma server`
+    command: irma server --no-tls --no-auth=false --url=http://localhost:8088 --config=/config/config.json
+    restart: unless-stopped
+    networks:
+      - app_network
+
+  redis:
+    image: 'redis:7-alpine'
+    # REDIS_PASSWORD is required; set it in a local .env file (see .env.example).
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set (see .env.example)}"]
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge

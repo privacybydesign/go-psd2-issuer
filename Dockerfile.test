@@ -1,0 +1,13 @@
+FROM golang:1.26.4 AS builder
+
+WORKDIR /app
+
+COPY . .
+
+RUN cd backend && go mod download
+
+# Run tests with coverage; write to /coverage inside the container.
+# In CI we'll mount a host dir to /coverage so we can upload the file.
+CMD cd backend && \
+    go test ./... -v -covermode=atomic -coverprofile=/coverage/coverage.out
+

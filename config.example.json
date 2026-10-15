@@ -1,0 +1,44 @@
+{
+    "server_config": {
+        "host": "0.0.0.0",
+        "port": 8080
+    },
+    "log_level": "info",
+    "jwt_private_key_path": "/secrets/priv.pem",
+    "irma_server_url": "http://localhost:8088",
+    "issuer_id": "psd2_issuer",
+    "public_url": "http://localhost:8080",
+    "credential_prefix": "irma-demo.enablenow",
+    "credential_validity_days": 90,
+    "enablenow_backend": "enablenow",
+    "enablenow_config": {
+        "client_id": "",
+        "client_secret": "",
+        "api_url": "https://api.enablenow.nl",
+        "app_url": "https://app.enablenow.nl/"
+    },
+    "categorization": {
+        "profile": "retail",
+        "country_code": "nl",
+        "months": 12,
+        "rounding": 10,
+        "min_confidence": 0,
+        "keep_consent": false
+    },
+    "storage_type": "redis",
+    "redis_config": {
+        "host": "redis",
+        "port": 6379,
+        "password": "change-me",
+        "namespace": "psd2-issuer"
+    },
+    "redis_sentinel_config": {
+        "sentinel_host": "redis-sentinel",
+        "sentinel_port": 26379,
+        "sentinel_username": "sentinel_user",
+        "password": "password123",
+        "master_name": "mymaster",
+        "namespace": "psd2-issuer"
+    },
+    "trusted_proxies": []
+}

@@ -1,0 +1,134 @@
+# Workflow to check whether changes to master fulfill all requirements.
+name: Status checks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  schedule:
+    # Run every monday on 9:00 in the morning (UTC).
+    - cron: "0 9 * * 1"
+  # Make it possible to trigger the checks manually.
+  workflow_dispatch:
+
+jobs:
+    build-frontend:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v6
+
+        - uses: actions/setup-node@v6
+          with:
+            node-version: '24'
+            cache: npm
+            cache-dependency-path: frontend/package-lock.json
+
+        - name: Install dependencies
+          working-directory: frontend
+          run: npm ci
+
+        - name: Build
+          working-directory: frontend
+          run: npm run build
+
+        - name: Test
+          working-directory: frontend
+          run: npx vitest run
+
+    analyze-go:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v6
+        - uses: actions/setup-go@v6
+          with:
+            go-version-file: backend/go.mod
+        - name: Check fmt
+          working-directory: backend
+          run:  test -z $(gofmt -l .)
+
+        - name: Check go fix
+          working-directory: backend
+          run: go fix -diff ./...
+
+        - name: Install GolangCI-Lint
+          run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+
+        - name: Run linter
+          working-directory: backend
+          run: golangci-lint run --timeout 5m
+
+    test-go:
+      runs-on: ubuntu-latest
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v6
+
+        - name: Docker meta
+          id: meta
+          uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+          with:
+            images: ghcr.io/${{ github.repository }}
+            tags: |
+              type=semver,pattern={{major}}.{{minor}}.{{patch}}
+              type=raw,value=edge
+
+        - name: Login to GitHub Container Registry
+          uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+          with:
+            registry: ghcr.io
+            username: ${{ github.actor }}
+            password: ${{ secrets.GITHUB_TOKEN }}
+
+        - name: Build Docker image for testing
+          run: docker build -t psd2-issuer-tests --file Dockerfile.test .
+
+        - name: Create coverage directory
+          run: mkdir -p coverage
+
+        - name: Run tests (emit coverage.out)
+          # Mount ./coverage from the runner into /coverage in the container
+          run: |
+            docker run --rm \
+              -v "${{ github.workspace }}/coverage:/coverage" \
+              psd2-issuer-tests
+
+        - name: Upload coverage to Codecov
+          uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+          with:
+            files: coverage/coverage.out
+            flags: backend
+            fail_ci_if_error: true
+          env:
+            # Required for private repos. Not needed if your repo is public and tokenless upload is enabled.
+            CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+       
+
+    build-docker-image:
+      runs-on: ubuntu-latest
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v6
+
+        - name: Docker meta
+          id: meta
+          uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+          with:
+            images: ghcr.io/${{ github.repository }}
+            tags: |
+              type=semver,pattern={{major}}.{{minor}}.{{patch}}
+              type=raw,value=edge
+
+        - name: Login to GitHub Container Registry
+          uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+          with:
+            registry: ghcr.io
+            username: ${{ github.actor }}
+            password: ${{ secrets.GITHUB_TOKEN }}
+
+        - name: Build container
+          uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+          with:
+            context: .
+            push: false
+            tags: ${{ steps.meta.outputs.tags }}
+            labels: ${{ steps.meta.outputs.labels }}
