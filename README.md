@@ -78,23 +78,29 @@ drift apart.
 
 ## Flow
 
-```
-browser            issuer backend                 enablenow
-   | POST /api/session/start                          |
-   |------------------>| new session (cookie + state) |
-   |<-- AppScreen URL -|                              |
-   |------------- bank login at app.enablenow.nl ---->|
-   |<--- redirect /callback?consent_id=..&state=.. ---|
-   | POST /api/session/consent (state checked)        |
-   | GET /api/session/status (polled every 2 s)       |
-   |                   |-- GET /v2/consents/{id} ---->| wait for transactions
-   |                   |-- POST /v2/categorization-jobs (or reuse auto-start job)
-   |                   |-- GET /v2/categorization-jobs/{id} until COMPLETED
-   |                   |-- GET /Transactions, /Accounts
-   |                   |-- DELETE /v2/consents/{id} ->| bank data removed
-   |<- status ready + computed values (review page)   |
-   | POST /api/session/issue {credentials:[...]}      |
-   |<- signed issuance JWT -> Yivi popup -> IRMA server
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant I as Issuer backend
+    participant E as enablenow
+    participant Y as Yivi app / IRMA server
+
+    B->>I: POST /api/session/start
+    I-->>B: AppScreen URL (sets session cookie + state)
+    B->>E: bank login at app.enablenow.nl
+    E-->>B: redirect /callback?consent_id=…&state=…
+    B->>I: POST /api/session/consent (state checked)
+    loop GET /api/session/status, every 2 s
+        I->>E: GET /v2/consents/{id} until transactions are available
+        I->>E: POST /v2/categorization-jobs (or reuse the auto-started job)
+        I->>E: GET /v2/categorization-jobs/{id} until COMPLETED
+        I->>E: GET /Transactions, /Accounts
+        I->>E: DELETE /v2/consents/{id} (bank data removed)
+    end
+    I-->>B: status ready + computed values (review page)
+    B->>I: POST /api/session/issue {credentials: [...]}
+    I-->>B: signed issuance JWT
+    B->>Y: Yivi popup, issuance session
 ```
 
 The flow is driven entirely by the status polls: there are no background
