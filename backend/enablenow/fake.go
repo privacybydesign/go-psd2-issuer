@@ -46,7 +46,7 @@ func (f *FakeClient) CreateConsent() string {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	id := newId()
-	now := f.Now()
+	now := Time{f.Now()}
 	f.consents[id] = &Consent{
 		Id:                      id,
 		Status:                  ConsentAuthenticated,

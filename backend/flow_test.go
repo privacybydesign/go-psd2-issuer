@@ -68,7 +68,7 @@ func TestFlowWaitsForTransactionsThenCategorizes(t *testing.T) {
 	require.Equal(t, StatusAwaitingTransactions, env.advance(t, 3*time.Second).Status)
 
 	// transactions fetched
-	fetched := env.now
+	fetched := enablenow.Time{Time: env.now}
 	env.client.consent.Status = enablenow.ConsentAuthenticated
 	env.client.consent.DateTransactionsUpdated = &fetched
 
@@ -99,7 +99,7 @@ func TestFlowReusesAutoStartedJob(t *testing.T) {
 	job, err := env.client.CreateCategorizationJob(t.Context(), enablenow.JobRequest{Engine: "e1", Profile: "retail", ConsentId: env.session.ConsentId})
 	require.NoError(t, err)
 
-	fetched := env.now
+	fetched := enablenow.Time{Time: env.now}
 	env.client.consent.Status = enablenow.ConsentUpdated
 	env.client.consent.DateTransactionsUpdated = &fetched
 

@@ -105,8 +105,9 @@ func TestCreateAndGetJob(t *testing.T) {
 			var req JobRequest
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 			require.Equal(t, JobRequest{Engine: "e1", Profile: "retail", CountryCode: "nl", ConsentId: "c1"}, req)
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"data":{"id":"j1","status":"PENDING","engine":"e1"}}`))
+			// the real API answers with just the job id
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"data":"j1"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/v2/categorization-jobs/j1":
 			_, _ = w.Write([]byte(`{"data":{"id":"j1","status":"COMPLETED","engine":"e1"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/v2/categorization-jobs":
@@ -119,6 +120,7 @@ func TestCreateAndGetJob(t *testing.T) {
 	job, err := client.CreateCategorizationJob(t.Context(), JobRequest{Engine: "e1", Profile: "retail", CountryCode: "nl", ConsentId: "c1"})
 	require.NoError(t, err)
 	require.Equal(t, "j1", job.Id)
+	require.Equal(t, JobPending, job.Status)
 
 	job, err = client.GetCategorizationJob(t.Context(), "j1")
 	require.NoError(t, err)
@@ -153,11 +155,51 @@ func TestTransactionDate(t *testing.T) {
 	}{
 		{Transaction{BookDate: "2026-01-02"}, time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), true},
 		{Transaction{BookDate: "2026-01-02T00:00:00"}, time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), true},
-		{Transaction{BookDate: "garbage", TransactionDateTime: &ts}, ts, true},
+		{Transaction{BookDate: "garbage", TransactionDateTime: &Time{ts}}, ts, true},
 		{Transaction{}, time.Time{}, false},
 	} {
 		got, ok := tc.tx.Date()
 		require.Equal(t, tc.ok, ok)
 		require.True(t, tc.want.Equal(got), "got %v want %v", got, tc.want)
 	}
+}
+
+func TestConsentWithZonelessTimestamps(t *testing.T) {
+	// enablenow returns timestamps without a time zone
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"id":"c1","status":"UPDATED","providerKey":"ENSANDBOX","dateRequested":"2026-10-15T11:48:53.9247493","dateTransactionsUpdated":"2026-10-15T11:48:56.1","dateExpire":null}}`))
+	})
+	consent, err := client.GetConsent(t.Context(), "c1")
+	require.NoError(t, err)
+	require.True(t, consent.HasTransactions())
+	require.Nil(t, consent.DateExpire)
+	require.Equal(t, time.Date(2026, 10, 15, 11, 48, 53, 924749300, time.UTC), consent.DateRequested.Time)
+}
+
+func TestTimeUnmarshal(t *testing.T) {
+	for in, want := range map[string]time.Time{
+		`"2026-10-15T11:48:53.9247493"`:   time.Date(2026, 10, 15, 11, 48, 53, 924749300, time.UTC),
+		`"2026-10-15T11:48:53"`:           time.Date(2026, 10, 15, 11, 48, 53, 0, time.UTC),
+		`"2026-10-15T11:48:53Z"`:          time.Date(2026, 10, 15, 11, 48, 53, 0, time.UTC),
+		`"2026-10-15T13:48:53+02:00"`:     time.Date(2026, 10, 15, 11, 48, 53, 0, time.UTC),
+		`"2026-10-15"`:                    time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC),
+		`"2019-08-24T14:15:22.123+00:00"`: time.Date(2019, 8, 24, 14, 15, 22, 123000000, time.UTC),
+	} {
+		var got Time
+		require.NoError(t, json.Unmarshal([]byte(in), &got), in)
+		require.True(t, want.Equal(got.Time), "%s: got %v", in, got.Time)
+	}
+	var bad Time
+	require.Error(t, json.Unmarshal([]byte(`"yesterday"`), &bad))
+}
+
+func TestCreateJobAcceptsJobObject(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"data":{"id":"j2","status":"INPROGRESS","engine":"e1"}}`))
+	})
+	job, err := client.CreateCategorizationJob(t.Context(), JobRequest{Engine: "e1", Profile: "retail", ConsentId: "c1"})
+	require.NoError(t, err)
+	require.Equal(t, "j2", job.Id)
+	require.Equal(t, JobInProgress, job.Status)
 }

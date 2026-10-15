@@ -332,9 +332,22 @@ func (c *HttpClient) ListCategorizationJobs(ctx context.Context, consentId strin
 }
 
 func (c *HttpClient) CreateCategorizationJob(ctx context.Context, req JobRequest) (*Job, error) {
-	var job Job
-	if err := c.do(ctx, http.MethodPost, "/v2/categorization-jobs", nil, req, &job); err != nil {
+	var raw json.RawMessage
+	if err := c.do(ctx, http.MethodPost, "/v2/categorization-jobs", nil, req, &raw); err != nil {
 		return nil, err
+	}
+	// the API answers 202 with just the job id ({"data": "<id>"}); accept a
+	// full job object as well
+	var id string
+	if err := json.Unmarshal(raw, &id); err == nil {
+		if id == "" {
+			return nil, errors.New("enablenow returned an empty categorization job id")
+		}
+		return &Job{Id: id, Status: JobPending, Engine: req.Engine, Profile: req.Profile, ConsentId: req.ConsentId}, nil
+	}
+	var job Job
+	if err := json.Unmarshal(raw, &job); err != nil {
+		return nil, fmt.Errorf("failed to parse categorization job: %w", err)
 	}
 	return &job, nil
 }

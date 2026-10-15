@@ -26,13 +26,13 @@ const (
 )
 
 type Consent struct {
-	Id                      string     `json:"id"`
-	Status                  string     `json:"status"`
-	ProviderKey             string     `json:"providerKey"`
-	DateStatusUpdated       *time.Time `json:"dateStatusUpdated"`
-	DateRequested           *time.Time `json:"dateRequested"`
-	DateExpire              *time.Time `json:"dateExpire"`
-	DateTransactionsUpdated *time.Time `json:"dateTransactionsUpdated"`
+	Id                      string `json:"id"`
+	Status                  string `json:"status"`
+	ProviderKey             string `json:"providerKey"`
+	DateStatusUpdated       *Time  `json:"dateStatusUpdated"`
+	DateRequested           *Time  `json:"dateRequested"`
+	DateExpire              *Time  `json:"dateExpire"`
+	DateTransactionsUpdated *Time  `json:"dateTransactionsUpdated"`
 }
 
 // IsFailed reports whether the consent ended up in a state from which no
@@ -55,9 +55,9 @@ func (c *Consent) HasTransactions() bool {
 }
 
 type Balance struct {
-	Currency string     `json:"currency"`
-	Date     *time.Time `json:"date"`
-	Amount   float64    `json:"amount"`
+	Currency string  `json:"currency"`
+	Date     *Time   `json:"date"`
+	Amount   float64 `json:"amount"`
 }
 
 type Account struct {
@@ -88,7 +88,7 @@ type Transaction struct {
 	AccountNumber            string               `json:"accountNumber"`
 	Description              string               `json:"description"`
 	BookDate                 string               `json:"bookDate"`
-	TransactionDateTime      *time.Time           `json:"transactionDateTime"`
+	TransactionDateTime      *Time                `json:"transactionDateTime"`
 	Amount                   float64              `json:"amount"`
 	Currency                 string               `json:"currency"`
 	CounterpartDescription   string               `json:"counterpartDescription"`
@@ -116,7 +116,7 @@ func (t *Transaction) Date() (time.Time, bool) {
 		}
 	}
 	if t.TransactionDateTime != nil {
-		return *t.TransactionDateTime, true
+		return t.TransactionDateTime.Time, true
 	}
 	return time.Time{}, false
 }
