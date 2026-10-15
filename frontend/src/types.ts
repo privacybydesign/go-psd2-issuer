@@ -1,6 +1,8 @@
-export type CredentialKey = 'income' | 'housing' | 'debts' | 'benefits' | 'bankaccount';
+// Credential keys come from the definitions: one per E1 top-level group
+// (income, housing, subsidy, ...) plus bankaccount.
+export type CredentialKey = string;
 
-export const CREDENTIAL_KEYS: CredentialKey[] = ['income', 'housing', 'debts', 'benefits', 'bankaccount'];
+export const BANK_ACCOUNT = 'bankaccount';
 
 export interface Credential {
   key: CredentialKey;
@@ -23,4 +25,30 @@ export interface StatusResponse {
 export interface IssueResponse {
   jwt: string;
   irma_server_url: string;
+}
+
+export interface Translated {
+  en: string;
+  nl: string;
+}
+
+export interface AttributeDefinition {
+  id: string;
+  // E1 category code; absent for attributes not taken from transactions
+  e1?: string;
+  name: Translated;
+  description: Translated;
+}
+
+export interface CredentialDefinition {
+  key: CredentialKey;
+  e1_group?: string;
+  name: Translated;
+  description: Translated;
+  attributes: AttributeDefinition[];
+}
+
+export interface Definitions {
+  period_attributes: AttributeDefinition[];
+  credentials: CredentialDefinition[];
 }

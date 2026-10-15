@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { startSession, ApiError } from '../api';
-import { Alert, CredentialTitle, Page } from '../components';
-import { CREDENTIAL_KEYS } from '../types';
+import { Alert, Page, translate, useDefinitions } from '../components';
 
 export default function IndexPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { definitions } = useDefinitions();
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
 
@@ -36,13 +36,15 @@ export default function IndexPage() {
       >
         {errorMessage && <Alert kind="danger">{errorMessage}</Alert>}
         <p>{t('index_explanation')}</p>
-        <ul className="credential-list">
-          {CREDENTIAL_KEYS.map((key) => (
-            <li key={key} className="credential-card">
-              <CredentialTitle credentialKey={key} />
-            </li>
-          ))}
-        </ul>
+        {definitions && (
+          <ul className="credential-names">
+            {definitions.credentials.map((definition) => (
+              <li key={definition.key} title={translate(definition.description, i18n.language)}>
+                {translate(definition.name, i18n.language)}
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="privacy-note">{t('index_privacy')}</p>
       </Page>
     </form>

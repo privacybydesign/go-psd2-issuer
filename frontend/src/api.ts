@@ -1,4 +1,4 @@
-import { IssueResponse, StatusResponse } from './types';
+import { Definitions, IssueResponse, StatusResponse } from './types';
 
 // ApiError carries the backend error code (e.g. "error:session-not-found")
 // converted to a translation key (e.g. "error_session_not_found").
@@ -46,3 +46,13 @@ export const issue = (credentials: string[]) =>
 
 export const deleteSession = () =>
   request<void>('DELETE', '/api/session');
+
+// The definitions never change while the page is open, so fetch them once.
+let definitions: Promise<Definitions> | undefined;
+export const getDefinitions = () => {
+  definitions ??= request<Definitions>('GET', '/api/definitions').catch((err) => {
+    definitions = undefined;
+    throw err;
+  });
+  return definitions;
+};

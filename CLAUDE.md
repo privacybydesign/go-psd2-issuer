@@ -2,8 +2,9 @@
 
 Go backend (`backend/`) plus a React frontend (`frontend/`). The user connects
 a bank through the enablenow AppScreen, enablenow categorizes the transactions
-(E1 engine), and the backend issues several small Yivi credentials (income,
-housing, debts, benefits, bankaccount). Modeled on go-sms-issuer.
+(E1 engine), and the backend issues Yivi credentials that mirror the E1 data
+model: one per E1 top-level group, one attribute per E1 code (signed net
+monthly averages), plus bankaccount. Modeled on go-sms-issuer.
 
 ## Build & test
 
@@ -16,10 +17,12 @@ housing, debts, benefits, bankaccount). Modeled on go-sms-issuer.
 
 ## Layout
 
-- `backend/credentials/`: pure aggregation from E1 categories to credential
-  attributes. Change attributes here, in `scheme/generate.py` (then regenerate
-  `scheme/`), and in the frontend translations; `scheme_test.go` checks the
-  backend and scheme agree.
+- `backend/credentials/definitions.json`: single source of truth for all
+  credentials and attributes (with en/nl texts). The backend embeds it,
+  `scheme/generate.py` reads it, the frontend fetches it from
+  `/api/definitions`. After changing it, regenerate `scheme/` (and the copy in
+  irma-demo-schememanager, which then needs re-signing); `scheme_test.go`
+  checks the backend and scheme agree.
 - `backend/enablenow/`: API client (`HttpClient`) and `FakeClient`.
 - `backend/flow.go`: poll-driven state machine; no background goroutines.
 

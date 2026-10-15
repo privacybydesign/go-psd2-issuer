@@ -129,6 +129,14 @@ func NewServer(state *ServerState, config ServerConfig) (*Server, error) {
 		writeJson(w, http.StatusOK, map[string]bool{"ok": true})
 	})
 
+	// the credential and attribute definitions with their translations, so
+	// the frontend doesn't keep its own copy
+	router.HandleFunc("/api/definitions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		_, _ = w.Write(credentials.DefinitionsJSON)
+	}).Methods(http.MethodGet)
+
 	router.HandleFunc("/api/session/start", func(w http.ResponseWriter, r *http.Request) {
 		handleStart(state, w, r)
 	}).Methods(http.MethodPost)

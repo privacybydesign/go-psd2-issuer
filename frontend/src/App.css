@@ -312,6 +312,23 @@ select {
 	margin: 16px 0;
 }
 
+.credential-names {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	list-style: none;
+	padding: 0;
+	margin: 16px 0;
+}
+
+.credential-names li {
+	background: #FFFFFF;
+	border: 1px solid #CFE4EF;
+	border-radius: 16px;
+	padding: 4px 12px;
+	font-size: 14px;
+}
+
 .credential-card {
 	background: #FFFFFF;
 	border: 1px solid #CFE4EF;

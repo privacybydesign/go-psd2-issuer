@@ -33,13 +33,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	fake := enablenow.NewFakeClient()
 	fake.JobDuration = 0
 
-	jwtCreator, err := NewIrmaJwtCreator("../test-secrets/priv.pem", "psd2_issuer", map[string]string{
-		credentials.Income:      "irma-demo.enablenow.income",
-		credentials.Housing:     "irma-demo.enablenow.housing",
-		credentials.Debts:       "irma-demo.enablenow.debts",
-		credentials.Benefits:    "irma-demo.enablenow.benefits",
-		credentials.BankAccount: "irma-demo.enablenow.bankaccount",
-	}, 90*24*time.Hour)
+	ids := map[string]string{}
+	for _, key := range credentials.AllKeys {
+		ids[key] = "irma-demo.enablenow." + key
+	}
+	jwtCreator, err := NewIrmaJwtCreator("../test-secrets/priv.pem", "psd2_issuer", ids, 90*24*time.Hour)
 	require.NoError(t, err)
 
 	storage := NewInMemorySessionStorage()
@@ -134,7 +132,7 @@ func TestFullIssuanceFlow(t *testing.T) {
 
 	status := env.status(t)
 	require.Equal(t, StatusReady, status.Status, status.Error)
-	require.Len(t, status.Credentials, 6)
+	require.Len(t, status.Credentials, len(credentials.AllKeys)+1) // two bank accounts
 
 	// the consent is deleted at enablenow once the credentials are computed
 	require.Equal(t, []string{consentId}, env.fake.Deleted)
@@ -153,6 +151,15 @@ func TestFullIssuanceFlow(t *testing.T) {
 	require.Equal(t, "irma-demo.enablenow.bankaccount", creds[1].Credential)
 	require.Equal(t, "NL91ABNA0417164300", creds[1].Attributes["iban"])
 	require.Equal(t, "irma-demo.enablenow.bankaccount", creds[2].Credential)
+}
+
+func TestDefinitions(t *testing.T) {
+	env := newTestEnv(t)
+	resp, body := env.do(t, http.MethodGet, "/api/definitions", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var defs credentials.Definitions
+	require.NoError(t, json.Unmarshal(body, &defs))
+	require.Equal(t, credentials.Defs, defs)
 }
 
 type issuedCredential struct {

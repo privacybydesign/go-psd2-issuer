@@ -14,32 +14,59 @@ issuance requests for an IRMA server.
 
 ## Credentials
 
-Rather than one big credential, the issuer offers five independent ones, so a
-verifier asks for (and the user discloses) only what is needed. All amounts
-are monthly averages in whole euros over the last 12 **full** calendar months,
-rounded to the nearest 10 (configurable). The current, incomplete month is
-not used. When the bank returns less history, the first partial month is
-skipped and `months` tells how many months the averages are based on.
+The credentials mirror the
+[E1 data model](https://docs.enablenow.nl/categorization/engines/e1-engine/categories):
+one credential per E1 (retail) top-level group, with one attribute per E1
+category code. The attribute id is the code below the group without
+separators, e.g. `income.pension.state` becomes `income.pensionstate` and
+`expense.transport.public_transport` becomes `transport.publictransport`. A
+verifier asks for (and the user discloses) only the attributes it needs.
 
-| Credential (`irma-demo.enablenow.*`) | Attributes | Based on E1 categories |
+Every amount is the **signed net** monthly average in whole euros over the
+last 12 **full** calendar months, rounded to the nearest 10 (configurable):
+positive means received, negative means paid, so `housing.rent` is `-1050`
+and two-way categories such as `alimony.other` or `investment.savings` keep
+their direction. The current, incomplete month is not used. When the bank
+returns less history, the first partial month is skipped and `months` tells
+how many months the averages are based on. No values are derived: no totals,
+yes/no flags or classifications.
+
+| Credential (`irma-demo.enablenow.*`) | E1 group | Attributes |
 |---|---|---|
-| `income` | `salary`, `pension`, `otherincome`, `total`, `salarymonths` | `income.salary`, `income.pension.*`, `income.rent` + `income.other` |
-| `housing` (housing and fixed costs) | `housingtype` (`rent`/`mortgage`/`other`/`none`), `housingcost`, `energy`, `water`, `insurance`, `telecom`, `municipaltaxes`, `total` | `housing.*`, `expense.essential.utilities.*`, `insurance.*`, `expense.essential.telecom`, `expense.essential.municipal` |
-| `debts` | `loanrepayments`, `studentloan`, `debtcollection`, `flashloan`, `bnpl`, `gambling` (the last four `yes`/`no`) | `loan.*` (repayments exclude `loan.debt_collection`), `gambling.*` |
-| `benefits` | `receivesbenefits` (`yes`/`no`), `healthcare`, `rent`, `child`, `unemployment`, `social`, `disability`, `student`, `other`, `total` | `subsidy.*` |
-| `bankaccount` (one per account) | `iban`, `accountholder`, `bank` | accounts of the consent |
+| `income` | `income.*` | `rent`, `salary`, `pensionstate`, `pensionprivate`, `pensionother`, `other` |
+| `housing` | `housing.*` | `rent`, `mortgage`, `other` |
+| `subsidy` | `subsidy.*` | `family`, `familyincome`, `health`, `disability`, `social`, `socialother`, `rent`, `unemployment`, `student`, `other` |
+| `loan` | `loan.*` | `debtcollection`, `student`, `flash`, `bnpl`, `creditcard`, `vehiclelease`, `private`, `other` |
+| `alimony` | `alimony.*` | `other` |
+| `insurance` | `insurance.*` | `health`, `vehicle`, `life`, `other` |
+| `tax` | `tax.*` | `income`, `vehicle`, `corporate`, `payroll`, `social`, `vat`, `other` |
+| `cash` | `cash.*` | `other` |
+| `gambling` | `gambling.*` | `lottery`, `other` |
+| `investment` | `investment.*` | `savings`, `crypto`, `pension`, `other` |
+| `essential` | `expense.essential.*` | `groceries`, `utilitiesenergy`, `utilitieswater`, `utilitiesother`, `childcare`, `clothing`, `medical`, `personalcare`, `education`, `financial`, `telecom`, `municipal`, `other` |
+| `transport` | `expense.transport.*` | `publictransport`, `fuel`, `vehicle`, `parking`, `other` |
+| `lifestyle` | `expense.lifestyle.*` | `restaurantsbars`, `streaming`, `subscriptions`, `sports`, `culture`, `travel`, `donations`, `pets`, `other` |
+| `expense` | `expense.*` | `salary`, `other` |
+| `other` | `other.*` | `fines`, `privatetransfer`, `other` |
+| `bankaccount` (one per account) | accounts of the consent | `iban`, `accountholder`, `bank` |
 
-`income`, `housing`, `debts` and `benefits` also carry `months`,
-`periodstart` and `periodend`. Credentials expire after 90 days
-(`credential_validity_days`), because financial data goes stale.
+All credentials except `bankaccount` also carry `months`, `periodstart` and
+`periodend`. Credentials expire after 90 days (`credential_validity_days`),
+because financial data goes stale.
 
-Netting follows the E1 rules: refunds and reversals keep the category of the
-original payment, and repaid benefits keep the benefit category with a negative
-amount, so both are netted against their category. Internal transfers
-(`internal.other`) are ignored, as are transactions in other currencies, without
-an E1 category, or below `min_confidence`.
+Each code counts only itself: `subsidy.family` does not include
+`subsidy.family.income`. Refunds and reversals keep the category of the
+original payment and repaid benefits keep the benefit category, so both are
+netted. Internal transfers (`internal.other`), corporate-only codes and
+transactions in other currencies, without an E1 category or below
+`min_confidence` are ignored. E1 flags are not used.
 
-The scheme definitions live in [`scheme/`](scheme/), generated by
+All credential and attribute definitions, with English and Dutch texts, live
+in [`backend/credentials/definitions.json`](backend/credentials/definitions.json).
+The backend embeds it, `scheme/generate.py` generates the scheme from it, and
+the frontend loads it from `GET /api/definitions`.
+
+The scheme definitions in [`scheme/`](scheme/) are generated by
 `python3 scheme/generate.py scheme --logos`. They are part of the
 `irma-demo` scheme since
 [irma-demo-schememanager#183](https://github.com/privacybydesign/irma-demo-schememanager/pull/183)
@@ -136,8 +163,19 @@ IRMA server requestor config (`local-secrets/irma-server/config.json`):
             "issue_perms": [
                 "irma-demo.enablenow.income",
                 "irma-demo.enablenow.housing",
-                "irma-demo.enablenow.debts",
-                "irma-demo.enablenow.benefits",
+                "irma-demo.enablenow.subsidy",
+                "irma-demo.enablenow.loan",
+                "irma-demo.enablenow.alimony",
+                "irma-demo.enablenow.insurance",
+                "irma-demo.enablenow.tax",
+                "irma-demo.enablenow.cash",
+                "irma-demo.enablenow.gambling",
+                "irma-demo.enablenow.investment",
+                "irma-demo.enablenow.essential",
+                "irma-demo.enablenow.transport",
+                "irma-demo.enablenow.lifestyle",
+                "irma-demo.enablenow.expense",
+                "irma-demo.enablenow.other",
                 "irma-demo.enablenow.bankaccount"
             ]
         }
@@ -149,6 +187,7 @@ IRMA server requestor config (`local-secrets/irma-server/config.json`):
 
 | Endpoint | |
 |---|---|
+| `GET /api/definitions` | credential and attribute definitions with translations |
 | `POST /api/session/start` | new session; returns `{url}` of the AppScreen and sets the session cookie |
 | `POST /api/session/consent` | `{consent_id, state}` from the redirect |
 | `GET /api/session/status` | advances the flow; `{status, error?, credentials?}` with status `awaiting_consent`, `awaiting_transactions`, `categorizing`, `ready` or `failed` |

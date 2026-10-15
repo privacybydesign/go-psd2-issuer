@@ -50,4 +50,17 @@ func TestSchemeMatchesCredentials(t *testing.T) {
 		slices.Sort(issued)
 		require.Equal(t, declared, issued, "attributes of %s", cred.Key)
 	}
+
+	// and no credentials that are no longer issued
+	entries, err := os.ReadDir(filepath.Join("..", "scheme", "irma-demo", "enablenow", "Issues"))
+	require.NoError(t, err)
+	var dirs []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirs = append(dirs, entry.Name())
+		}
+	}
+	keys := slices.Clone(credentials.AllKeys)
+	slices.Sort(keys)
+	require.Equal(t, keys, dirs)
 }

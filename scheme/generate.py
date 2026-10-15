@@ -4,43 +4,27 @@ Usage: python3 scheme/generate.py <scheme-root> [--logos]
 
 Writes <scheme-root>/irma-demo/enablenow/... (or <scheme-root>/enablenow/...
 when <scheme-root> is itself the irma-demo scheme, i.e. contains
-description.xml). The attribute ids must match backend/credentials; the
-backend test scheme_test.go checks this against the copy in scheme/.
+description.xml). The credentials and attributes come from
+backend/credentials/definitions.json, the same file the backend uses;
+credential directories that are no longer defined are removed.
 """
+import json
 import math
 import os
+import shutil
 import struct
 import sys
 import zlib
 from xml.sax.saxutils import escape as e
 
+DEFINITIONS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", "credentials", "definitions.json")
+
 ISSUER = "enablenow"
 CATEGORY = ("Finance", "Financieel")
 COLORS = ("#ffffff", "#0B4F3C", "#167A5B")
 
-M = ("Average per month in whole euros over the analysed period",
-     "Gemiddelde per maand in hele euro's over de geanalyseerde periode")
-
-
-def amt(i, en, nl):
-    return (i, en, nl) + M
-
-
-def yn(i, en, nl, den, dnl):
-    return (i, en, nl, den + " ('yes' or 'no')", dnl + " ('yes' of 'no')")
-
-
-PERIOD = [
-    ("months", "Months analysed", "Geanalyseerde maanden",
-     "Number of full calendar months the averages are based on",
-     "Aantal volledige kalendermaanden waarop de gemiddelden zijn gebaseerd"),
-    ("periodstart", "Period from", "Periode vanaf",
-     "First day of the analysed period (YYYY-MM-DD)",
-     "Eerste dag van de geanalyseerde periode (JJJJ-MM-DD)"),
-    ("periodend", "Period until", "Periode tot en met",
-     "Last day of the analysed period (YYYY-MM-DD)",
-     "Laatste dag van de geanalyseerde periode (JJJJ-MM-DD)"),
-]
+AMOUNT = (" (net average per month in whole euros; positive is received, negative is paid)",
+          " (netto gemiddelde per maand in hele euro's; positief is ontvangen, negatief is betaald)")
 
 HOWTO = ("1. Log in to your bank through enablenow and give permission to read your transactions.\\n"
          "2. Your transactions of the last 12 months are categorized automatically.\\n"
@@ -52,97 +36,43 @@ HOWTO = ("1. Log in to your bank through enablenow and give permission to read y
 PURPOSE = ("With financial data in your Yivi app you can prove facts about your finances, for example to a landlord or lender, without handing over your bank statements.",
            "Met financiële gegevens in je Yivi-app kun je feiten over je financiën aantonen, bijvoorbeeld aan een verhuurder of geldverstrekker, zonder je bankafschriften af te geven.")
 
-# key: (name, description, faq intro, singleton, attributes)
-CREDENTIALS = {
-    "income": (
-        ("Demo Income", "Demo Inkomen"),
-        ("Your average monthly income, derived from your bank transactions",
-         "Je gemiddelde maandelijkse inkomen, afgeleid uit je banktransacties"),
-        ("Add your average monthly income, derived from your bank transactions, to your Yivi app.",
-         "Voeg je gemiddelde maandelijkse inkomen, afgeleid uit je banktransacties, toe aan je Yivi-app."),
-        True, [
-            amt("salary", "Salary per month", "Salaris per maand"),
-            amt("pension", "Pension per month", "Pensioen per maand"),
-            amt("otherincome", "Other income per month", "Overig inkomen per maand"),
-            amt("total", "Total income per month", "Totaal inkomen per maand"),
-            ("salarymonths", "Months with salary", "Maanden met salaris",
-             "Number of analysed months in which salary was received",
-             "Aantal geanalyseerde maanden waarin salaris is ontvangen"),
-        ] + PERIOD),
-    "housing": (
-        ("Demo Housing and fixed costs", "Demo Wonen en vaste lasten"),
-        ("Your average monthly housing and fixed costs, derived from your bank transactions",
-         "Je gemiddelde maandelijkse woonlasten en vaste lasten, afgeleid uit je banktransacties"),
-        ("Add your average monthly housing and fixed costs, derived from your bank transactions, to your Yivi app.",
-         "Voeg je gemiddelde maandelijkse woonlasten en vaste lasten, afgeleid uit je banktransacties, toe aan je Yivi-app."),
-        True, [
-            ("housingtype", "Housing", "Woonsituatie",
-             "'rent', 'mortgage', 'other' or 'none', based on the largest housing cost",
-             "'rent', 'mortgage', 'other' of 'none', op basis van de grootste woonlast"),
-            amt("housingcost", "Housing costs per month", "Woonlasten per maand"),
-            amt("energy", "Energy per month", "Energie per maand"),
-            amt("water", "Water and other utilities per month", "Water en overige nutsvoorzieningen per maand"),
-            amt("insurance", "Insurance per month", "Verzekeringen per maand"),
-            amt("telecom", "Telecom per month", "Telecom per maand"),
-            amt("municipaltaxes", "Municipal taxes per month", "Gemeentelijke belastingen per maand"),
-            amt("total", "Total fixed costs per month", "Totaal vaste lasten per maand"),
-        ] + PERIOD),
-    "debts": (
-        ("Demo Debts", "Demo Schulden"),
-        ("Your loan repayments and debt related signals, derived from your bank transactions",
-         "Je aflossingen en schuldsignalen, afgeleid uit je banktransacties"),
-        ("Add your loan repayments and debt related signals, derived from your bank transactions, to your Yivi app.",
-         "Voeg je aflossingen en schuldsignalen, afgeleid uit je banktransacties, toe aan je Yivi-app."),
-        True, [
-            amt("loanrepayments", "Loan repayments per month", "Aflossingen per maand"),
-            amt("studentloan", "Student loan repayments per month", "Aflossing studieschuld per maand"),
-            yn("debtcollection", "Debt collection", "Incasso of deurwaarder",
-               "Whether payments to a debt collector or bailiff were found",
-               "Of er betalingen aan een incassobureau of deurwaarder zijn gevonden"),
-            yn("flashloan", "Flash loans", "Flitskredieten",
-               "Whether flash loan transactions were found",
-               "Of er transacties van flitskredieten zijn gevonden"),
-            yn("bnpl", "Buy now, pay later", "Achteraf betalen",
-               "Whether buy now, pay later transactions were found",
-               "Of er transacties van achteraf betalen zijn gevonden"),
-            yn("gambling", "Gambling", "Gokken",
-               "Whether gambling transactions were found",
-               "Of er goktransacties zijn gevonden"),
-        ] + PERIOD),
-    "benefits": (
-        ("Demo Benefits", "Demo Toeslagen en uitkeringen"),
-        ("The allowances and benefits you receive, derived from your bank transactions",
-         "De toeslagen en uitkeringen die je ontvangt, afgeleid uit je banktransacties"),
-        ("Add the allowances and benefits you receive, derived from your bank transactions, to your Yivi app.",
-         "Voeg de toeslagen en uitkeringen die je ontvangt, afgeleid uit je banktransacties, toe aan je Yivi-app."),
-        True, [
-            yn("receivesbenefits", "Receives benefits", "Ontvangt toeslagen of uitkeringen",
-               "Whether any allowance or benefit was received",
-               "Of er een toeslag of uitkering is ontvangen"),
-            amt("healthcare", "Healthcare allowance per month", "Zorgtoeslag per maand"),
-            amt("rent", "Rent allowance per month", "Huurtoeslag per maand"),
-            amt("child", "Child benefits per month", "Kinderbijslag en kindgebonden budget per maand"),
-            amt("unemployment", "Unemployment benefits per month", "WW-uitkering per maand"),
-            amt("social", "Social assistance per month", "Bijstand per maand"),
-            amt("disability", "Disability benefits per month", "Arbeidsongeschiktheidsuitkering per maand"),
-            amt("student", "Student finance per month", "Studiefinanciering per maand"),
-            amt("other", "Other benefits per month", "Overige toeslagen per maand"),
-            amt("total", "Total benefits per month", "Totaal toeslagen en uitkeringen per maand"),
-        ] + PERIOD),
-    "bankaccount": (
-        ("Demo Bank account", "Demo Bankrekening"),
-        ("A bank account you have access to, verified through PSD2",
-         "Een bankrekening waartoe je toegang hebt, geverifieerd via PSD2"),
-        ("Add a bank account you have access to, verified through PSD2, to your Yivi app.",
-         "Voeg een bankrekening waartoe je toegang hebt, geverifieerd via PSD2, toe aan je Yivi-app."),
-        False, [
-            ("iban", "IBAN", "IBAN", "International bank account number", "Internationaal bankrekeningnummer"),
-            ("accountholder", "Account holder", "Rekeninghouder",
-             "Name of the account holder as known by the bank",
-             "Naam van de rekeninghouder zoals bekend bij de bank"),
-            ("bank", "Bank", "Bank", "Identifier of the bank", "Identificatie van de bank"),
-        ]),
-}
+
+def pair(t):
+    return (t["en"], t["nl"])
+
+
+def lower_first(s):
+    # keep acronyms such as AOW or IBAN
+    return s if s[1:2].isupper() else s[0].lower() + s[1:]
+
+
+def load_credentials():
+    """Returns {key: (name, description, faq intro, singleton, attributes)}."""
+    with open(DEFINITIONS) as f:
+        defs = json.load(f)
+    period = [(a["id"], *pair(a["name"]), *pair(a["description"])) for a in defs["period_attributes"]]
+    out = {}
+    for c in defs["credentials"]:
+        en, nl = pair(c["name"])
+        den, dnl = pair(c["description"])
+        e1 = bool(c.get("e1_group"))
+        if e1:
+            den += ", derived from your bank transactions"
+            dnl += ", afgeleid uit je banktransacties"
+        attrs = []
+        for a in c["attributes"]:
+            aen, anl = pair(a["description"])
+            if a.get("e1"):
+                aen, anl = f"E1 category {a['e1']}: {aen}{AMOUNT[0]}", f"E1-categorie {a['e1']}: {anl}{AMOUNT[1]}"
+            attrs.append((a["id"], *pair(a["name"]), aen, anl))
+        out[c["key"]] = (
+            ("Demo " + en, "Demo " + nl),
+            (den, dnl),
+            (f"Add {lower_first(den)}, to your Yivi app.", f"Voeg {lower_first(dnl)}, toe aan je Yivi-app."),
+            e1,
+            attrs + (period if e1 else []),
+        )
+    return out
 
 
 def tr(tag, pair, indent="\t"):
@@ -159,8 +89,8 @@ def issuer_xml():
 
 
 def credential_xml(cid, name, desc, intro, singleton, attrs):
-    content = ("You will add the following data:\\n" + ",\\n".join("• " + a[1][0].lower() + a[1][1:] for a in attrs) + ".",
-               "Je voegt de volgende gegevens toe:\\n" + ",\\n".join("• " + a[2][0].lower() + a[2][1:] for a in attrs) + ".")
+    content = ("You will add the following data:\\n" + ",\\n".join("• " + lower_first(a[1]) for a in attrs) + ".",
+               "Je voegt de volgende gegevens toe:\\n" + ",\\n".join("• " + lower_first(a[2]) for a in attrs) + ".")
     out = "<IssueSpecification version=\"4\">\n" + tr("Name", name) + tr("ShortName", name)
     out += f"\t<SchemeManager>irma-demo</SchemeManager>\n\t<IssuerID>{ISSUER}</IssuerID>\n\t<CredentialID>{cid}</CredentialID>\n"
     out += tr("Description", desc)
@@ -209,19 +139,22 @@ def hexrgb(h):
 GLYPHS = {
     "income": [[(.5, .18), (.80, .50), (.62, .50), (.62, .82), (.38, .82), (.38, .50), (.20, .50)]],
     "housing": [[(.5, .18), (.84, .48), (.74, .48), (.74, .82), (.26, .82), (.26, .48), (.16, .48)]],
-    "debts": [[(.5, .82), (.80, .50), (.62, .50), (.62, .18), (.38, .18), (.38, .50), (.20, .50)]],
-    "benefits": [[(.40, .18), (.60, .18), (.60, .40), (.82, .40), (.82, .60), (.60, .60), (.60, .82),
+    "loan": [[(.5, .82), (.80, .50), (.62, .50), (.62, .18), (.38, .18), (.38, .50), (.20, .50)]],
+    "subsidy": [[(.40, .18), (.60, .18), (.60, .40), (.82, .40), (.82, .60), (.60, .60), (.60, .82),
                   (.40, .82), (.40, .60), (.18, .60), (.18, .40), (.40, .40)]],
     "bankaccount": [[(.5, .16), (.86, .36), (.14, .36)], [(.20, .40), (.30, .40), (.30, .70), (.20, .70)],
                     [(.45, .40), (.55, .40), (.55, .70), (.45, .70)], [(.70, .40), (.80, .40), (.80, .70), (.70, .70)],
                     [(.14, .74), (.86, .74), (.86, .84), (.14, .84)]],
 }
 GLYPHS[ISSUER] = GLYPHS["bankaccount"]
+# three bars, for the credentials without a glyph of their own
+GENERIC = [[(.22, .26), (.78, .26), (.78, .38), (.22, .38)], [(.22, .44), (.78, .44), (.78, .56), (.22, .56)],
+           [(.22, .62), (.62, .62), (.62, .74), (.22, .74)]]
 
 
 def logo(key):
     start, end = hexrgb(COLORS[1]), hexrgb(COLORS[2])
-    polys = GLYPHS[key]
+    polys = GLYPHS.get(key, GENERIC)
     c, r = SIZE / 2, SIZE / 2 - 2
     rows = []
     for py in range(SIZE):
@@ -261,7 +194,14 @@ def main():
     if logos:
         with open(os.path.join(issuer_dir, "logo.png"), "wb") as f:
             f.write(logo(ISSUER))
-    for cid, (name, desc, intro, singleton, attrs) in CREDENTIALS.items():
+    credentials = load_credentials()
+    issues = os.path.join(issuer_dir, "Issues")
+    if os.path.isdir(issues):
+        for old in sorted(os.listdir(issues)):
+            if old not in credentials and os.path.exists(os.path.join(issues, old, "description.xml")):
+                shutil.rmtree(os.path.join(issues, old))
+                print("removed", old)
+    for cid, (name, desc, intro, singleton, attrs) in credentials.items():
         d = os.path.join(issuer_dir, "Issues", cid)
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "description.xml"), "w") as f:

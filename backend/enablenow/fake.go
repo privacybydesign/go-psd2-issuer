@@ -123,6 +123,10 @@ var fakeMonthlyTransactions = []fakeMonthly{
 	{21, -88.15, "expense.essential.groceries", "acc-1"},
 	{16, -12.99, "expense.lifestyle.streaming", "acc-1"},
 	{18, -42.00, "expense.lifestyle.restaurants_bars", "acc-1"},
+	{6, -64.20, "expense.transport.fuel", "acc-1"},
+	{3, -41.75, "insurance.vehicle", "acc-1"},
+	{4, -27.00, "tax.vehicle", "acc-1"},
+	{27, -150.00, "investment.savings", "acc-1"},
 	{26, -400.00, "internal.other", "acc-1"},
 	{26, 400.00, "internal.other", "acc-2"},
 }

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ApiError, getStatus, issue } from '../api';
-import { Alert, AttributeTable, CredentialTitle, Page } from '../components';
-import { Credential, CredentialKey, CREDENTIAL_KEYS, StatusResponse } from '../types';
+import { Alert, AttributeTable, CredentialTitle, isEmpty, Page, useDefinitions } from '../components';
+import { Credential, CredentialKey, StatusResponse } from '../types';
 
 export default function ReviewPage() {
   const navigate = useNavigate();
@@ -12,7 +12,9 @@ export default function ReviewPage() {
   const [credentials, setCredentials] = useState<Credential[] | undefined>(
     (location.state as StatusResponse | null)?.credentials,
   );
-  const [selected, setSelected] = useState<Set<CredentialKey>>(new Set(CREDENTIAL_KEYS));
+  const { definitions, error: definitionsError } = useDefinitions();
+  // undefined until the defaults are known: every card with a non-zero amount
+  const [chosenKeys, setSelected] = useState<Set<CredentialKey> | undefined>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
@@ -37,8 +39,15 @@ export default function ReviewPage() {
     for (const credential of credentials ?? []) {
       byKey.set(credential.key, [...(byKey.get(credential.key) ?? []), credential]);
     }
-    return CREDENTIAL_KEYS.filter((key) => byKey.has(key)).map((key) => ({ key, credentials: byKey.get(key)! }));
-  }, [credentials]);
+    return (definitions?.credentials ?? [])
+      .filter((definition) => byKey.has(definition.key))
+      .map((definition) => ({ key: definition.key, definition, credentials: byKey.get(definition.key)! }));
+  }, [credentials, definitions]);
+
+  const selected = useMemo(
+    () => chosenKeys ?? new Set(groups.filter((g) => !g.credentials.every((c) => isEmpty(c, g.definition))).map((g) => g.key)),
+    [chosenKeys, groups],
+  );
 
   const toggle = (key: CredentialKey) => {
     const next = new Set(selected);
@@ -100,16 +109,17 @@ export default function ReviewPage() {
       >
         {message && <Alert kind="success">{message}</Alert>}
         {errorMessage && <Alert kind="danger">{errorMessage}</Alert>}
+        {definitionsError !== undefined && <Alert kind="danger">{t('definitions_error')}</Alert>}
         <p>{t('review_explanation')}</p>
         <ul className="credential-list">
-          {groups.map(({ key, credentials }) => (
+          {definitions && groups.map(({ key, definition, credentials }) => (
             <li key={key} className={`credential-card ${selected.has(key) ? '' : 'unselected'}`}>
               <label className="select">
                 <input type="checkbox" checked={selected.has(key)} onChange={() => toggle(key)} />
-                <div><CredentialTitle credentialKey={key} /></div>
+                <div><CredentialTitle definition={definition} /></div>
               </label>
               {credentials.map((credential, i) => (
-                <AttributeTable key={i} credential={credential} />
+                <AttributeTable key={i} credential={credential} definitions={definitions} />
               ))}
             </li>
           ))}
