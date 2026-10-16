@@ -1,4 +1,4 @@
-import { Definitions, Household, IssueResponse, StatusResponse, VerifierResult, VerifierStartResponse } from './types';
+import { Definitions, Household, IssueResponse, StatusResponse, VerifierLaw, VerifierResult, VerifierStartResponse } from './types';
 
 // ApiError carries the backend error code (e.g. "error:session-not-found")
 // converted to a translation key (e.g. "error_session_not_found").
@@ -47,8 +47,11 @@ export const issue = (credentials: string[]) =>
 export const deleteSession = () =>
   request<void>('DELETE', '/api/session');
 
-export const startVerification = (household: Household) =>
-  request<VerifierStartResponse>('POST', '/api/verifier/start', { household });
+export const getVerifierLaws = () =>
+  request<VerifierLaw[]>('GET', '/api/verifier/laws');
+
+export const startVerification = (law: string, household: Household, taxAssessment?: number) =>
+  request<VerifierStartResponse>('POST', '/api/verifier/start', { law, household, tax_assessment: taxAssessment || undefined });
 
 export const verificationResult = () =>
   request<VerifierResult>('GET', '/api/verifier/result');

@@ -488,3 +488,29 @@ select {
 	font-size: 0.85em;
 	padding-left: 1.2em;
 }
+
+.law-card label.select h2 {
+	margin: 0;
+}
+
+.credential-card input[type="radio"] {
+	width: 20px;
+	height: 20px;
+	margin: 0;
+	flex-shrink: 0;
+	accent-color: #E12747;
+}
+
+.requested {
+	font-size: 0.85em;
+	margin-top: 0.5em;
+}
+
+.requested ul, .sources {
+	padding-left: 1.2em;
+	margin: 0.25em 0;
+}
+
+.rule-card.outcome-partial {
+	border-left: 4px solid #f9a825;
+}

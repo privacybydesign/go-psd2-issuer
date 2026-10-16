@@ -18,10 +18,11 @@ import (
 	"github.com/privacybydesign/irmago/irma"
 )
 
-// The demo verifier asks the user to disclose income and benefit attributes
-// and evaluates a few social security rules (package rules) on them. The
-// IRMA server session is started and its result fetched by the backend, so
-// the browser never holds the requestor token and cannot alter the result.
+// The demo verifier lets the user choose a law (package rules), asks for
+// exactly the attributes that law needs plus the date of birth, and
+// evaluates the law on them. The IRMA server session is started and its
+// result fetched by the backend, so the browser never holds the requestor
+// token and cannot alter the result.
 
 // verifierCookieName holds the id of a verifier session; it is separate from
 // the issuance session so the two do not replace each other.
@@ -31,11 +32,21 @@ const ErrorVerifierDisabled = "error:verifier-disabled"
 const ErrorIrmaServer = "error:irma-server"
 const ErrorInvalidProof = "error:invalid-proof"
 
+// DefaultDateOfBirthAttribute is the attribute the age is derived from.
+const DefaultDateOfBirthAttribute = "irma-demo.gemeente.personalData.dateofbirth"
+
+// maxTaxAssessment bounds the tax assessment a user can enter, in euros.
+const maxTaxAssessment = 100_000
+
 type DemoVerifierConfig struct {
 	Enabled bool `json:"enabled"`
 	// IrmaServerUrl is the IRMA server as reached from this backend, e.g.
 	// http://irma:8088 in Docker Compose. Defaults to irma_server_url.
 	IrmaServerUrl string `json:"irma_server_url,omitempty"`
+	// DateOfBirthAttribute is the Yivi attribute with the date of birth,
+	// e.g. pbdf.gemeente.personalData.dateofbirth. Defaults to
+	// DefaultDateOfBirthAttribute.
+	DateOfBirthAttribute string `json:"date_of_birth_attribute,omitempty"`
 }
 
 // RequestSigner signs session requests as the requestor of this service.
@@ -48,49 +59,66 @@ type Verification struct {
 	// RequestorToken gives access to the session result at the IRMA
 	// server; it never leaves the backend.
 	RequestorToken string          `json:"requestor_token"`
+	Law            string          `json:"law"`
 	Household      rules.Household `json:"household"`
+	TaxAssessment  int             `json:"tax_assessment,omitempty"`
 }
 
 type Verifier struct {
 	irmaServerURL string
 	signer        RequestSigner
 	client        *http.Client
-	request       *irma.DisclosureRequest
-	// facts maps the Yivi attribute ids to the keys of rules.Facts.
-	facts map[irma.AttributeTypeIdentifier]string
+	// attributes maps the keys of rules.Facts to the Yivi attribute ids.
+	attributes  map[string]irma.AttributeTypeIdentifier
+	dateOfBirth irma.AttributeTypeIdentifier
 }
 
-// NewVerifier builds the disclosure request for the attributes the rules
-// need, and nothing else. All of them are required: the income per art. 32 is
-// the sum of them, so it cannot be determined without any one of them.
-func NewVerifier(irmaServerURL string, signer RequestSigner, credentialIds map[string]string) (*Verifier, error) {
+func NewVerifier(irmaServerURL string, signer RequestSigner, credentialIds map[string]string, dateOfBirthAttribute string) (*Verifier, error) {
+	if dateOfBirthAttribute == "" {
+		dateOfBirthAttribute = DefaultDateOfBirthAttribute
+	}
+	if strings.Count(dateOfBirthAttribute, ".") != 3 {
+		return nil, fmt.Errorf("date of birth attribute %q is not of the form scheme.issuer.credential.attribute", dateOfBirthAttribute)
+	}
 	v := &Verifier{
 		irmaServerURL: strings.TrimRight(irmaServerURL, "/"),
 		signer:        signer,
 		client:        &http.Client{Timeout: 10 * time.Second},
-		request:       irma.NewDisclosureRequest(),
-		facts:         map[irma.AttributeTypeIdentifier]string{},
+		attributes:    map[string]irma.AttributeTypeIdentifier{},
+		dateOfBirth:   irma.NewAttributeTypeIdentifier(dateOfBirthAttribute),
 	}
+	for _, law := range rules.Laws {
+		for _, fact := range law.Attributes {
+			key, attribute, _ := strings.Cut(fact, ".")
+			id, ok := credentialIds[key]
+			if !ok {
+				return nil, fmt.Errorf("no credential id for %q", key)
+			}
+			v.attributes[fact] = irma.NewAttributeTypeIdentifier(id + "." + attribute)
+		}
+	}
+	return v, nil
+}
 
+// request builds the disclosure request for a law: the attributes it needs,
+// grouped per credential, and the date of birth. All of them are required,
+// because the law cannot be applied without any one of them.
+func (v *Verifier) request(law rules.Law) *irma.DisclosureRequest {
+	request := irma.NewDisclosureRequest()
 	var order []string
 	byCredential := map[string]irma.AttributeCon{}
-	for _, fact := range rules.Attributes() {
-		key, attribute, _ := strings.Cut(fact, ".")
-		id, ok := credentialIds[key]
-		if !ok {
-			return nil, fmt.Errorf("no credential id for %q", key)
-		}
+	for _, fact := range law.Attributes {
+		key, _, _ := strings.Cut(fact, ".")
 		if _, ok := byCredential[key]; !ok {
 			order = append(order, key)
 		}
-		typeId := irma.NewAttributeTypeIdentifier(id + "." + attribute)
-		byCredential[key] = append(byCredential[key], irma.AttributeRequest{Type: typeId})
-		v.facts[typeId] = fact
+		byCredential[key] = append(byCredential[key], irma.AttributeRequest{Type: v.attributes[fact]})
 	}
 	for _, key := range order {
-		v.request.Disclose = append(v.request.Disclose, irma.AttributeDisCon{byCredential[key]})
+		request.Disclose = append(request.Disclose, irma.AttributeDisCon{byCredential[key]})
 	}
-	return v, nil
+	request.Disclose = append(request.Disclose, irma.AttributeDisCon{{{Type: v.dateOfBirth}}})
+	return request
 }
 
 // irmaSessionPackage is the IRMA server's response to a new session.
@@ -109,8 +137,8 @@ type irmaSessionResult struct {
 	Disclosed   [][]*irma.DisclosedAttribute `json:"disclosed"`
 }
 
-func (v *Verifier) startSession(ctx context.Context) (*irmaSessionPackage, error) {
-	jwt, err := v.signer.SignRequest(v.request)
+func (v *Verifier) startSession(ctx context.Context, law rules.Law) (*irmaSessionPackage, error) {
+	jwt, err := v.signer.SignRequest(v.request(law))
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign disclosure request: %w", err)
 	}
@@ -157,38 +185,83 @@ func (v *Verifier) do(req *http.Request, out any) error {
 	return json.Unmarshal(body, out)
 }
 
-// readFacts converts the disclosed attributes to rules.Facts. Every attribute
-// the rules need must be present.
-func (v *Verifier) readFacts(disclosed [][]*irma.DisclosedAttribute) (rules.Facts, error) {
-	facts := rules.Facts{}
+// dateFormats are the formats of the date of birth in the gemeente
+// credentials (DD-MM-YYYY) and ISO 8601.
+var dateFormats = []string{"02-01-2006", time.DateOnly}
+
+func parseDate(value string) (time.Time, error) {
+	for _, format := range dateFormats {
+		if t, err := time.ParseInLocation(format, strings.TrimSpace(value), time.Local); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unknown date format %q", value)
+}
+
+// readDisclosure converts the disclosed attributes to the facts of a law and
+// the date of birth. Every attribute the law needs must be present.
+func (v *Verifier) readDisclosure(disclosed [][]*irma.DisclosedAttribute, law rules.Law) (rules.Facts, time.Time, error) {
+	present := map[irma.AttributeTypeIdentifier]string{}
 	for _, con := range disclosed {
 		for _, attribute := range con {
-			if attribute == nil || attribute.Status != irma.AttributeProofStatusPresent || attribute.RawValue == nil {
-				continue
+			if attribute != nil && attribute.Status == irma.AttributeProofStatusPresent && attribute.RawValue != nil {
+				present[attribute.Identifier] = *attribute.RawValue
 			}
-			fact, ok := v.facts[attribute.Identifier]
-			if !ok {
-				continue
-			}
-			value, err := strconv.Atoi(*attribute.RawValue)
-			if err != nil {
-				return nil, fmt.Errorf("attribute %s is not a number", attribute.Identifier)
-			}
-			facts[fact] = value
 		}
 	}
-	for id, fact := range v.facts {
-		if _, ok := facts[fact]; !ok {
-			return nil, fmt.Errorf("attribute %s was not disclosed", id)
+	facts := rules.Facts{}
+	for _, fact := range law.Attributes {
+		id := v.attributes[fact]
+		raw, ok := present[id]
+		if !ok {
+			return nil, time.Time{}, fmt.Errorf("attribute %s was not disclosed", id)
 		}
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, time.Time{}, fmt.Errorf("attribute %s is not a number", id)
+		}
+		facts[fact] = value
 	}
-	return facts, nil
+	raw, ok := present[v.dateOfBirth]
+	if !ok {
+		return nil, time.Time{}, fmt.Errorf("attribute %s was not disclosed", v.dateOfBirth)
+	}
+	dateOfBirth, err := parseDate(raw)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("attribute %s: %w", v.dateOfBirth, err)
+	}
+	return facts, dateOfBirth, nil
 }
 
 // -----------------------------------------------------------------------------------
 
+type VerifierLaw struct {
+	Id string `json:"id"`
+	// Attributes are the facts the law asks for, keyed as in the
+	// definitions ("income.salary"); the date of birth comes on top.
+	Attributes         []string `json:"attributes"`
+	NeedsTaxAssessment bool     `json:"needs_tax_assessment"`
+}
+
+// handleVerifierLaws lists the laws, so the user sees what each one asks
+// for before sharing anything.
+func handleVerifierLaws(state *ServerState, w http.ResponseWriter, r *http.Request) {
+	if state.verifier == nil {
+		respondWithErr(w, http.StatusNotFound, ErrorVerifierDisabled, "demo verifier is disabled", nil, "endpoint", r.URL.Path)
+		return
+	}
+	laws := make([]VerifierLaw, len(rules.Laws))
+	for i, law := range rules.Laws {
+		laws[i] = VerifierLaw{Id: law.Id, Attributes: law.Attributes, NeedsTaxAssessment: law.NeedsTaxAssessment}
+	}
+	writeJson(w, http.StatusOK, laws)
+}
+
 type VerifierStartPayload struct {
+	Law       string          `json:"law"`
 	Household rules.Household `json:"household"`
+	// TaxAssessment is the amount of the assessment in euros, optional.
+	TaxAssessment int `json:"tax_assessment,omitempty"`
 }
 
 type VerifierStartResponse struct {
@@ -197,7 +270,7 @@ type VerifierStartResponse struct {
 }
 
 // handleVerifierStart starts a disclosure session at the IRMA server for the
-// household the user declared.
+// chosen law and the household the user declared.
 func handleVerifierStart(state *ServerState, w http.ResponseWriter, r *http.Request) {
 	endpoint := r.URL.Path
 	if state.verifier == nil {
@@ -221,12 +294,21 @@ func handleVerifierStart(state *ServerState, w http.ResponseWriter, r *http.Requ
 	if !readJson(w, r, &body) {
 		return
 	}
+	law, ok := rules.LawById(body.Law)
+	if !ok {
+		respondWithErr(w, http.StatusBadRequest, ErrorBadRequest, "unknown law", nil, "endpoint", endpoint, "law", body.Law)
+		return
+	}
 	if err := body.Household.Validate(); err != nil {
 		respondWithErr(w, http.StatusBadRequest, ErrorBadRequest, "invalid household", err, "endpoint", endpoint)
 		return
 	}
+	if body.TaxAssessment < 0 || body.TaxAssessment > maxTaxAssessment || (body.TaxAssessment != 0 && !law.NeedsTaxAssessment) {
+		respondWithErr(w, http.StatusBadRequest, ErrorBadRequest, "invalid tax assessment", nil, "endpoint", endpoint)
+		return
+	}
 
-	pkg, err := state.verifier.startSession(r.Context())
+	pkg, err := state.verifier.startSession(r.Context(), law)
 	if err != nil {
 		respondWithErr(w, http.StatusBadGateway, ErrorIrmaServer, "failed to start disclosure session", err, "endpoint", endpoint)
 		return
@@ -239,7 +321,12 @@ func handleVerifierStart(state *ServerState, w http.ResponseWriter, r *http.Requ
 	}
 	session := NewSession(time.Now())
 	session.Status = StatusVerifying
-	session.Verification = &Verification{RequestorToken: pkg.Token, Household: body.Household}
+	session.Verification = &Verification{
+		RequestorToken: pkg.Token,
+		Law:            law.Id,
+		Household:      body.Household,
+		TaxAssessment:  body.TaxAssessment,
+	}
 	if err := state.sessionStorage.Put(session); err != nil {
 		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to store session", err, "endpoint", endpoint)
 		return
@@ -249,12 +336,14 @@ func handleVerifierStart(state *ServerState, w http.ResponseWriter, r *http.Requ
 }
 
 type VerifierResultResponse struct {
-	Household  rules.Household  `json:"household"`
-	Evaluation rules.Evaluation `json:"evaluation"`
+	Household     rules.Household  `json:"household"`
+	AgeGroup      string           `json:"age_group"`
+	TaxAssessment int              `json:"tax_assessment,omitempty"`
+	Evaluation    rules.Evaluation `json:"evaluation"`
 }
 
 // handleVerifierResult fetches the disclosed attributes from the IRMA server
-// and evaluates the rules. The session is forgotten afterwards.
+// and evaluates the law. The session is forgotten afterwards.
 func handleVerifierResult(state *ServerState, w http.ResponseWriter, r *http.Request) {
 	endpoint := r.URL.Path
 	if state.verifier == nil {
@@ -275,8 +364,14 @@ func handleVerifierResult(state *ServerState, w http.ResponseWriter, r *http.Req
 		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to load session", err, "endpoint", endpoint)
 		return
 	}
+	verification := session.Verification
+	law, ok := rules.LawById(verification.Law)
+	if !ok {
+		respondWithErr(w, http.StatusNotFound, ErrorSessionNotFound, "law of verifier session not found", nil, "endpoint", endpoint)
+		return
+	}
 
-	result, err := state.verifier.sessionResult(r.Context(), session.Verification.RequestorToken)
+	result, err := state.verifier.sessionResult(r.Context(), verification.RequestorToken)
 	if err != nil {
 		respondWithErr(w, http.StatusBadGateway, ErrorIrmaServer, "failed to fetch session result", err, "endpoint", endpoint)
 		return
@@ -289,14 +384,27 @@ func handleVerifierResult(state *ServerState, w http.ResponseWriter, r *http.Req
 		respondWithErr(w, http.StatusBadRequest, ErrorInvalidProof, "disclosure not valid", nil, "endpoint", endpoint, "type", result.Type, "proof_status", result.ProofStatus)
 		return
 	}
-	facts, err := state.verifier.readFacts(result.Disclosed)
+	facts, dateOfBirth, err := state.verifier.readDisclosure(result.Disclosed, law)
 	if err != nil {
 		respondWithErr(w, http.StatusBadRequest, ErrorInvalidProof, "unexpected disclosure", err, "endpoint", endpoint)
 		return
 	}
-	evaluation, err := rules.Evaluate(session.Verification.Household, facts, time.Now())
+
+	now := time.Now()
+	ageGroup, err := rules.AgeGroupAt(dateOfBirth, now)
 	if err != nil {
-		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to evaluate rules", err, "endpoint", endpoint)
+		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to determine age group", err, "endpoint", endpoint)
+		return
+	}
+	evaluation, err := law.Evaluate(rules.Input{
+		Household:     verification.Household,
+		AgeGroup:      ageGroup,
+		Facts:         facts,
+		Date:          now,
+		TaxAssessment: verification.TaxAssessment,
+	})
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to evaluate law", err, "endpoint", endpoint)
 		return
 	}
 
@@ -305,11 +413,13 @@ func handleVerifierResult(state *ServerState, w http.ResponseWriter, r *http.Req
 	}
 	setVerifierCookie(state, w, "", -1)
 
-	slog.Info("evaluated disclosed attributes", "law_version", evaluation.Source.Version)
+	slog.Info("evaluated disclosed attributes", "law", law.Id)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJson(w, http.StatusOK, VerifierResultResponse{
-		Household:  session.Verification.Household,
-		Evaluation: evaluation,
+		Household:     verification.Household,
+		AgeGroup:      ageGroup,
+		TaxAssessment: verification.TaxAssessment,
+		Evaluation:    evaluation,
 	})
 }
 
