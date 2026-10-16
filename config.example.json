@@ -42,6 +42,7 @@
     },
     "trusted_proxies": [],
     "demo_verifier": {
-        "enabled": false
+        "enabled": false,
+        "date_of_birth_attribute": "irma-demo.gemeente.personalData.dateofbirth"
     }
 }
