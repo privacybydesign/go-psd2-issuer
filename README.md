@@ -114,17 +114,19 @@ expires after 30 minutes or when the user finishes.
 `/<lang>/verifier` (e.g. `/nl/verifier`) is a demo verifier that gives an
 indication of eligibility for social assistance and similar schemes, based
 on the [Participatiewet](https://wetten.overheid.nl/BWBR0015703) as
-published in [regelrecht-corpus](https://github.com/MinBZK/regelrecht-corpus)
-(version 2026-04-03). The user declares their household (age group, partner,
-cost-sharing housemates), which the bank data does not contain, and discloses
-the `income`, `subsidy`, `alimony` and `tax` attributes with Yivi; every
-credential is optional. The rules live in [`backend/rules`](backend/rules):
+published in [regelrecht-corpus](https://github.com/MinBZK/regelrecht-corpus),
+using the version in force on the day of the check (`rules.Versions`:
+2026-04-03 and 2026-07-01). The user declares their household (age group,
+partner, cost-sharing housemates), which the bank data does not contain, and
+discloses exactly the attributes the law counts as income, all required. The
+rules live in [`backend/rules`](backend/rules):
 
 - **Income** (art. 31, 32): the net monthly averages of work, pension,
-  rental income, social security benefits, alimony and tax refunds count.
-  The Awir allowances (`subsidy.family`, `subsidy.health`, `subsidy.rent`,
-  art. 31.2.d) and the bijstand itself (`subsidy.social`,
-  `subsidy.socialother`) do not count, and neither do negative net amounts.
+  rental income, social security benefits, alimony and tax refunds; negative
+  net amounts do not count. The Awir allowances (`subsidy.family`,
+  `subsidy.health`, `subsidy.rent`, art. 31.2.d) and the bijstand itself
+  (`subsidy.social`, `subsidy.socialother`) are no income, so they are not
+  asked for.
 - **Bijstand** (21 or older, art. 21) or **AIO supplement** (state pension
   age, art. 22): the norm for a single person or couple, or the
   cost-sharing norm (art. 22a), minus the income.

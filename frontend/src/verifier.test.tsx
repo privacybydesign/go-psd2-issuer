@@ -6,11 +6,10 @@ import i18n from './i18n';
 
 const result: VerifierResult = {
   household: { age_group: 'adult', partner: false, partner_pension_age: false, housemates: 1 },
-  disclosed: ['income', 'subsidy'],
   evaluation: {
-    source: { law: 'Participatiewet', bwb_id: 'BWBR0015703', version: '2026-04-03', url: 'https://wetten.overheid.nl/BWBR0015703/2026-04-03' },
+    source: { law: 'Participatiewet', bwb_id: 'BWBR0015703', version: '2026-07-01', url: 'https://wetten.overheid.nl/BWBR0015703/2026-07-01' },
     counted: [{ attribute: 'income.salary', amount: 80000, article: '32.1.a' }],
-    excluded: [{ attribute: 'subsidy.rent', amount: 30000, article: '31.2.d', reason: 'awir' }],
+    excluded: [{ attribute: 'tax.income', amount: -5000, reason: 'negative' }],
     income: 80000,
     results: [
       {
@@ -18,9 +17,9 @@ const result: VerifierResult = {
         outcome: 'indication',
         steps: [
           { key: 'cost_sharers', article: '22a.1', amount: 2 },
-          { key: 'norm_cost_sharing', article: '22a.1.a', amount: 100107 },
+          { key: 'norm_cost_sharing', article: '22a.1.a', amount: 101390 },
           { key: 'income', article: '32', amount: 80000 },
-          { key: 'supplement', article: '19.1', amount: 20107 },
+          { key: 'supplement', article: '19.1', amount: 21390 },
         ],
         notes: ['note_assets'],
       },
@@ -41,16 +40,16 @@ describe('VerifierResultView', () => {
     expect(screen.getByText('Your income is above the example income limit.')).toBeInTheDocument();
     // a count, not an amount
     expect(screen.getByText('2')).toBeInTheDocument();
-    expect(screen.getByText('€1,001.07')).toBeInTheDocument();
-    expect(screen.getByText('€201.07')).toBeInTheDocument();
+    expect(screen.getByText('€1,013.90')).toBeInTheDocument();
+    expect(screen.getByText('€213.90')).toBeInTheDocument();
     expect(screen.getByText('Income per month: €800.00')).toBeInTheDocument();
-    expect(screen.getByText(/allowance, does not count/)).toBeInTheDocument();
-    expect(screen.getByText('art. 22a.1.a').closest('a')).toHaveAttribute('href', 'https://wetten.overheid.nl/BWBR0015703/2026-04-03#Artikel22a');
+    expect(screen.getByText(/more paid back than received/)).toBeInTheDocument();
+    expect(screen.getByText('art. 22a.1.a').closest('a')).toHaveAttribute('href', 'https://wetten.overheid.nl/BWBR0015703/2026-07-01#Artikel22a');
   });
 });
 
 describe('articleUrl', () => {
   it('links to the article of the version used', () => {
-    expect(articleUrl(result.evaluation, '31.2.d')).toBe('https://wetten.overheid.nl/BWBR0015703/2026-04-03#Artikel31');
+    expect(articleUrl(result.evaluation, '31.2.d')).toBe('https://wetten.overheid.nl/BWBR0015703/2026-07-01#Artikel31');
   });
 });

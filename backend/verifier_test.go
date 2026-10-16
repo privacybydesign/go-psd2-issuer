@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"psd2-issuer/rules"
+	"strings"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -57,6 +58,28 @@ func disclosed(id, value string) map[string]any {
 	return map[string]any{"id": id, "rawvalue": value, "value": map[string]string{"": value}, "status": "PRESENT", "issuancetime": 1760000000}
 }
 
+// disclosure discloses every attribute the rules need, as 0 unless given in
+// values, grouped per credential like the request.
+func disclosure(values map[string]string) [][]any {
+	var cons [][]any
+	byCredential := map[string]int{}
+	for _, fact := range rules.Attributes() {
+		key, _, _ := strings.Cut(fact, ".")
+		i, ok := byCredential[key]
+		if !ok {
+			i = len(cons)
+			byCredential[key] = i
+			cons = append(cons, nil)
+		}
+		value, ok := values[fact]
+		if !ok {
+			value = "0"
+		}
+		cons[i] = append(cons[i], disclosed("irma-demo.enablenow."+fact, value))
+	}
+	return cons
+}
+
 func newVerifierTestEnv(t *testing.T) (*testEnv, *fakeIrmaServer) {
 	t.Helper()
 	env := newTestEnv(t)
@@ -83,24 +106,26 @@ func TestVerifierFlow(t *testing.T) {
 	require.Contains(t, start, "frontendRequest")
 	require.NotContains(t, string(body), "requestor-token")
 
-	// one optional disjunction per credential: [[attributes...], []]
+	// one required disjunction per credential, with a single option
 	disclose := irmaServer.request["disclose"].([]any)
 	require.Len(t, disclose, 4)
-	income := disclose[0].([]any)
-	require.Len(t, income, 2)
-	require.Empty(t, income[1])
-	require.Contains(t, income[0], "irma-demo.enablenow.income.salary")
-
-	irmaServer.result["disclosed"] = [][]any{
-		{disclosed("irma-demo.enablenow.income.salary", "900"), disclosed("irma-demo.enablenow.income.rent", "0")},
-		{disclosed("irma-demo.enablenow.subsidy.rent", "350")},
+	var requested []string
+	for _, discon := range disclose {
+		require.Len(t, discon, 1)
+		for _, attribute := range discon.([]any)[0].([]any) {
+			requested = append(requested, attribute.(string))
+		}
 	}
+	require.Len(t, requested, len(rules.Attributes()))
+	require.Contains(t, requested, "irma-demo.enablenow.income.salary")
+	require.NotContains(t, requested, "irma-demo.enablenow.subsidy.rent")
+
+	irmaServer.result["disclosed"] = disclosure(map[string]string{"income.salary": "900"})
 	resp, body = env.do(t, http.MethodGet, "/api/verifier/result", nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	var result VerifierResultResponse
 	require.NoError(t, json.Unmarshal(body, &result))
 	require.Equal(t, household, result.Household)
-	require.Equal(t, []string{"income", "subsidy"}, result.Disclosed)
 	require.Equal(t, int64(90000), result.Evaluation.Income)
 	require.Equal(t, rules.OutcomeIndication, result.Evaluation.Results[0].Outcome)
 
@@ -108,6 +133,18 @@ func TestVerifierFlow(t *testing.T) {
 	resp, body = env.do(t, http.MethodGet, "/api/verifier/result", nil)
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 	require.Equal(t, ErrorSessionNotFound, string(body))
+}
+
+func TestVerifierRejectsIncompleteDisclosure(t *testing.T) {
+	env, irmaServer := newVerifierTestEnv(t)
+	resp, body := env.do(t, http.MethodPost, "/api/verifier/start", VerifierStartPayload{Household: rules.Household{AgeGroup: rules.AgeAdult}})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	cons := disclosure(nil)
+	irmaServer.result["disclosed"] = cons[:len(cons)-1]
+	resp, body = env.do(t, http.MethodGet, "/api/verifier/result", nil)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.Equal(t, ErrorInvalidProof, string(body))
 }
 
 func TestVerifierRejectsInvalidProof(t *testing.T) {

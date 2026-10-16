@@ -2,14 +2,20 @@
 // the monthly averages in the enablenow credentials, for the demo verifier.
 //
 // The rules follow the text of the Participatiewet as published in
-// regelrecht-corpus (regulation/nl/wet/participatiewet/2026-04-03.yaml,
-// https://github.com/MinBZK/regelrecht-corpus). The result is an indication,
+// regelrecht-corpus (regulation/nl/wet/participatiewet/<valid from>.yaml,
+// https://github.com/MinBZK/regelrecht-corpus), using the version in force on
+// the day of the check. The result is an indication,
 // not a decision: only the college of the municipality (or the SVB for the
 // AIO) decides on bijstand, and assets (art. 34), the partner's income and
 // the exclusion grounds of art. 13 are not checked.
 package rules
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"time"
+	_ "time/tzdata" // the dates of the law are Dutch dates
+)
 
 // Source identifies the version of the law the norms are taken from.
 type Source struct {
@@ -19,20 +25,56 @@ type Source struct {
 	Url     string `json:"url"`
 }
 
-var Participatiewet = Source{
-	Law:     "Participatiewet",
-	BwbId:   "BWBR0015703",
-	Version: "2026-04-03",
-	Url:     "https://wetten.overheid.nl/BWBR0015703/2026-04-03",
+// Version is a version of the Participatiewet with the norms per calendar
+// month it sets, in euro cents.
+type Version struct {
+	// ValidFrom is the date the version enters into force (YYYY-MM-DD); it
+	// applies until the next version.
+	ValidFrom     string
+	Single        int64 // art. 21 onderdeel a
+	Couple        int64 // art. 21 onderdeel b
+	PensionSingle int64 // art. 22 onderdeel a
+	PensionCouple int64 // art. 22 onderdelen b en c
 }
 
-// Norms per calendar month in euro cents, art. 21 and 22.
-const (
-	normSingle        = 140150 // art. 21 onderdeel a
-	normCouple        = 200213 // art. 21 onderdeel b
-	normPensionSingle = 156469 // art. 22 onderdeel a
-	normPensionCouple = 214416 // art. 22 onderdelen b en c
-)
+// Versions are sorted by ValidFrom. The norms are indexed every 1 January
+// and 1 July: add the new version when it is published on
+// wetten.overheid.nl (and harvested into regelrecht-corpus).
+var Versions = []Version{
+	{ValidFrom: "2026-04-03", Single: 140150, Couple: 200213, PensionSingle: 156469, PensionCouple: 214416},
+	{ValidFrom: "2026-07-01", Single: 141946, Couple: 202779, PensionSingle: 158734, PensionCouple: 217610},
+}
+
+var ErrNoVersion = errors.New("no version of the Participatiewet known for this date")
+
+var amsterdam = must(time.LoadLocation("Europe/Amsterdam"))
+
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// VersionAt returns the version in force on the (Dutch) date of t.
+func VersionAt(t time.Time) (Version, error) {
+	date := t.In(amsterdam).Format(time.DateOnly)
+	for i := len(Versions) - 1; i >= 0; i-- {
+		if Versions[i].ValidFrom <= date {
+			return Versions[i], nil
+		}
+	}
+	return Version{}, ErrNoVersion
+}
+
+func (v Version) Source() Source {
+	return Source{
+		Law:     "Participatiewet",
+		BwbId:   "BWBR0015703",
+		Version: v.ValidFrom,
+		Url:     "https://wetten.overheid.nl/BWBR0015703/" + v.ValidFrom,
+	}
+}
 
 // MinimaPercentage is the income limit of the example municipal minima
 // schemes, as a percentage of the bijstandsnorm. Every municipality sets its
@@ -77,8 +119,7 @@ func (h Household) Validate() error {
 }
 
 // Facts are the disclosed attributes, keyed "<credential>.<attribute>" (e.g.
-// "income.salary"), in whole euros per month. Attributes that were not
-// disclosed are missing.
+// "income.salary"), in whole euros per month. Missing attributes count as 0.
 type Facts map[string]int
 
 // Item is one line of the income calculation.
@@ -86,11 +127,10 @@ type Item struct {
 	Attribute string `json:"attribute"`
 	// Amount in euro cents per month, as disclosed.
 	Amount int64 `json:"amount"`
-	// Article is the provision the amount is or is not counted under.
+	// Article is the provision the amount is counted under.
 	Article string `json:"article,omitempty"`
-	// Reason says why an amount is not counted: "awir" (an allowance under
-	// the Awir), "assessed" (the bijstand being assessed) or "negative"
-	// (more paid back than received).
+	// Reason says why an amount is not counted: "negative" (more paid back
+	// than received).
 	Reason string `json:"reason,omitempty"`
 }
 
@@ -131,35 +171,31 @@ type Evaluation struct {
 
 type incomeRule struct {
 	attribute string
-	counted   bool
 	article   string
-	reason    string
 }
 
-// incomeRules says for every attribute the verifier asks for whether it is
-// income per art. 32, or why not.
+// incomeRules lists the attributes that are income per art. 32; these are
+// all the rules need. The other benefits are deliberately not asked for:
+// the Awir allowances (subsidy.family, subsidy.health, subsidy.rent) are no
+// income (art. 31.2.d), and subsidy.social and subsidy.socialother are the
+// bijstand that is being assessed.
 var incomeRules = []incomeRule{
-	{"income.salary", true, "32.1.a", ""},       // inkomsten uit arbeid
-	{"income.other", true, "32.1.a", ""},        // incl. inkomen als zelfstandige
-	{"income.rent", true, "32.1.a", ""},         // inkomsten uit verhuur
-	{"income.pensionstate", true, "32.1.a", ""}, // socialezekerheidsuitkering
-	{"income.pensionprivate", true, "32.1.a", ""},
-	{"income.pensionother", true, "32.1.a", ""},
-	{"subsidy.unemployment", true, "32.1.a", ""},
-	{"subsidy.disability", true, "32.1.a", ""},
-	{"subsidy.familyincome", true, "32.1.a", ""},
-	{"subsidy.student", true, "32.1.a", ""},
-	{"subsidy.other", true, "32.1.a", ""},
-	{"alimony.other", true, "32.1.a", ""},       // uitkeringen tot levensonderhoud, Boek 1 BW
-	{"tax.income", true, "32.1.a", ""},          // teruggave inkomstenbelasting
-	{"subsidy.family", false, "31.2.d", "awir"}, // kindgebonden budget, kinderopvangtoeslag
-	{"subsidy.health", false, "31.2.d", "awir"}, // zorgtoeslag
-	{"subsidy.rent", false, "31.2.d", "awir"},   // huurtoeslag
-	{"subsidy.social", false, "", "assessed"},
-	{"subsidy.socialother", false, "", "assessed"},
+	{"income.salary", "32.1.a"},       // inkomsten uit arbeid
+	{"income.other", "32.1.a"},        // incl. inkomen als zelfstandige
+	{"income.rent", "32.1.a"},         // inkomsten uit verhuur
+	{"income.pensionstate", "32.1.a"}, // socialezekerheidsuitkering
+	{"income.pensionprivate", "32.1.a"},
+	{"income.pensionother", "32.1.a"},
+	{"subsidy.unemployment", "32.1.a"},
+	{"subsidy.disability", "32.1.a"},
+	{"subsidy.familyincome", "32.1.a"},
+	{"subsidy.student", "32.1.a"},
+	{"subsidy.other", "32.1.a"},
+	{"alimony.other", "32.1.a"}, // uitkeringen tot levensonderhoud, Boek 1 BW
+	{"tax.income", "32.1.a"},    // teruggave inkomstenbelasting
 }
 
-// Attributes lists the attributes the rules use, keyed as in Facts.
+// Attributes lists the attributes the rules need, keyed as in Facts.
 func Attributes() []string {
 	attributes := make([]string, len(incomeRules))
 	for i, r := range incomeRules {
@@ -168,24 +204,25 @@ func Attributes() []string {
 	return attributes
 }
 
-// Evaluate applies the rules to the household and the disclosed facts.
-func Evaluate(household Household, facts Facts) Evaluation {
-	evaluation := Evaluation{Source: Participatiewet, Counted: []Item{}, Excluded: []Item{}}
+// Evaluate applies the rules to the household and the disclosed facts, with
+// the norms of the version of the law in force on the given date.
+func Evaluate(household Household, facts Facts, date time.Time) (Evaluation, error) {
+	version, err := VersionAt(date)
+	if err != nil {
+		return Evaluation{}, err
+	}
+	evaluation := Evaluation{Source: version.Source(), Counted: []Item{}, Excluded: []Item{}}
 	for _, r := range incomeRules {
-		value, ok := facts[r.attribute]
-		if !ok || value == 0 {
-			continue
-		}
-		item := Item{Attribute: r.attribute, Amount: int64(value) * 100, Article: r.article, Reason: r.reason}
-		// a negative net amount means more was paid (back) than received,
-		// which is not income
-		if r.counted && value > 0 {
+		value := facts[r.attribute]
+		item := Item{Attribute: r.attribute, Amount: int64(value) * 100}
+		switch {
+		case value > 0:
+			item.Article = r.article
 			evaluation.Counted = append(evaluation.Counted, item)
 			evaluation.Income += item.Amount
-		} else {
-			if r.counted {
-				item.Article, item.Reason = "", "negative"
-			}
+		case value < 0:
+			// more was paid (back) than received, which is no income
+			item.Reason = "negative"
 			evaluation.Excluded = append(evaluation.Excluded, item)
 		}
 	}
@@ -210,10 +247,10 @@ func Evaluate(household Household, facts Facts) Evaluation {
 			{Rule: rule, Outcome: OutcomeNotEvaluated, Notes: []string{"note_under21"}},
 			{Rule: "minima", Outcome: OutcomeNotEvaluated, Notes: []string{"note_under21"}},
 		}
-		return evaluation
+		return evaluation, nil
 	}
 
-	normSteps, norm := Norm(household)
+	normSteps, norm := Norm(household, version)
 	income := Step{Key: "income", Article: "32", Amount: evaluation.Income}
 
 	// art. 19: the bijstand tops up the income to the norm
@@ -236,25 +273,25 @@ func Evaluate(household Household, facts Facts) Evaluation {
 	}
 
 	evaluation.Results = []Result{bijstand, minima}
-	return evaluation
+	return evaluation, nil
 }
 
 // Norm returns the monthly bijstandsnorm in euro cents for an applicant of
 // 21 or older (art. 21, 22 and 22a), with the steps that lead to it.
-func Norm(h Household) ([]Step, int64) {
+func Norm(h Household, v Version) ([]Step, int64) {
 	pension := h.AgeGroup == AgePension
 	if h.Housemates == 0 {
 		switch {
 		case !h.Partner && pension:
-			return []Step{{Key: "norm_single", Article: "22.a", Amount: normPensionSingle}}, normPensionSingle
+			return []Step{{Key: "norm_single", Article: "22.a", Amount: v.PensionSingle}}, v.PensionSingle
 		case !h.Partner:
-			return []Step{{Key: "norm_single", Article: "21.a", Amount: normSingle}}, normSingle
+			return []Step{{Key: "norm_single", Article: "21.a", Amount: v.Single}}, v.Single
 		case pension:
-			return []Step{{Key: "norm_couple", Article: "22.b", Amount: normPensionCouple}}, normPensionCouple
+			return []Step{{Key: "norm_couple", Article: "22.b", Amount: v.PensionCouple}}, v.PensionCouple
 		case h.PartnerPensionAge:
-			return []Step{{Key: "norm_couple", Article: "22.c", Amount: normPensionCouple}}, normPensionCouple
+			return []Step{{Key: "norm_couple", Article: "22.c", Amount: v.PensionCouple}}, v.PensionCouple
 		default:
-			return []Step{{Key: "norm_couple", Article: "21.b", Amount: normCouple}}, normCouple
+			return []Step{{Key: "norm_couple", Article: "21.b", Amount: v.Couple}}, v.Couple
 		}
 	}
 
@@ -265,12 +302,12 @@ func Norm(h Household) ([]Step, int64) {
 	if h.Partner {
 		a++
 	}
-	own, ownArticle := int64(normCouple), "22a.1.a"
+	own, ownArticle := v.Couple, "22a.1.a"
 	switch {
 	case pension:
-		own, ownArticle = normPensionCouple, "22a.1.c"
+		own, ownArticle = v.PensionCouple, "22a.1.c"
 	case h.PartnerPensionAge:
-		own, ownArticle = normPensionCouple, "22a.1.b"
+		own, ownArticle = v.PensionCouple, "22a.1.b"
 	}
 	share := func(b int64) int64 {
 		// round to whole cents, half up
@@ -279,12 +316,12 @@ func Norm(h Household) ([]Step, int64) {
 	steps := []Step{{Key: "cost_sharers", Article: "22a.1", Amount: a}, {Key: "norm_cost_sharing", Article: ownArticle, Amount: share(own)}}
 	norm := share(own)
 	if h.Partner {
-		partner, partnerArticle := int64(normCouple), "22a.1.a"
+		partner, partnerArticle := v.Couple, "22a.1.a"
 		switch {
 		case h.PartnerPensionAge:
-			partner, partnerArticle = normPensionCouple, "22a.1.c"
+			partner, partnerArticle = v.PensionCouple, "22a.1.c"
 		case pension:
-			partner, partnerArticle = normPensionCouple, "22a.1.b"
+			partner, partnerArticle = v.PensionCouple, "22a.1.b"
 		}
 		steps = append(steps, Step{Key: "norm_cost_sharing_partner", Article: partnerArticle, Amount: share(partner)})
 		norm += share(partner)

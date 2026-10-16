@@ -75,7 +75,7 @@ export interface IncomeItem {
   // euro cents per month
   amount: number;
   article?: string;
-  reason?: 'awir' | 'assessed' | 'negative';
+  reason?: 'negative';
 }
 
 export interface RuleStep {
@@ -104,6 +104,5 @@ export interface Evaluation {
 
 export interface VerifierResult {
   household: Household;
-  disclosed: string[] | null;
   evaluation: Evaluation;
 }

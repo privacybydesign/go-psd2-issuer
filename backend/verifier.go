@@ -60,8 +60,9 @@ type Verifier struct {
 	facts map[irma.AttributeTypeIdentifier]string
 }
 
-// NewVerifier builds the disclosure request for the attributes the rules use.
-// Every credential is optional, because users only add the cards they want.
+// NewVerifier builds the disclosure request for the attributes the rules
+// need, and nothing else. All of them are required: the income per art. 32 is
+// the sum of them, so it cannot be determined without any one of them.
 func NewVerifier(irmaServerURL string, signer RequestSigner, credentialIds map[string]string) (*Verifier, error) {
 	v := &Verifier{
 		irmaServerURL: strings.TrimRight(irmaServerURL, "/"),
@@ -87,7 +88,7 @@ func NewVerifier(irmaServerURL string, signer RequestSigner, credentialIds map[s
 		v.facts[typeId] = fact
 	}
 	for _, key := range order {
-		v.request.Disclose = append(v.request.Disclose, irma.AttributeDisCon{byCredential[key], {}})
+		v.request.Disclose = append(v.request.Disclose, irma.AttributeDisCon{byCredential[key]})
 	}
 	return v, nil
 }
@@ -156,11 +157,10 @@ func (v *Verifier) do(req *http.Request, out any) error {
 	return json.Unmarshal(body, out)
 }
 
-// readFacts converts the disclosed attributes to rules.Facts and lists the
-// credentials they came from.
-func (v *Verifier) readFacts(disclosed [][]*irma.DisclosedAttribute) (rules.Facts, []string, error) {
+// readFacts converts the disclosed attributes to rules.Facts. Every attribute
+// the rules need must be present.
+func (v *Verifier) readFacts(disclosed [][]*irma.DisclosedAttribute) (rules.Facts, error) {
 	facts := rules.Facts{}
-	var credentials []string
 	for _, con := range disclosed {
 		for _, attribute := range con {
 			if attribute == nil || attribute.Status != irma.AttributeProofStatusPresent || attribute.RawValue == nil {
@@ -172,15 +172,17 @@ func (v *Verifier) readFacts(disclosed [][]*irma.DisclosedAttribute) (rules.Fact
 			}
 			value, err := strconv.Atoi(*attribute.RawValue)
 			if err != nil {
-				return nil, nil, fmt.Errorf("attribute %s is not a number", attribute.Identifier)
+				return nil, fmt.Errorf("attribute %s is not a number", attribute.Identifier)
 			}
 			facts[fact] = value
-			if key, _, _ := strings.Cut(fact, "."); len(credentials) == 0 || credentials[len(credentials)-1] != key {
-				credentials = append(credentials, key)
-			}
 		}
 	}
-	return facts, credentials, nil
+	for id, fact := range v.facts {
+		if _, ok := facts[fact]; !ok {
+			return nil, fmt.Errorf("attribute %s was not disclosed", id)
+		}
+	}
+	return facts, nil
 }
 
 // -----------------------------------------------------------------------------------
@@ -247,9 +249,7 @@ func handleVerifierStart(state *ServerState, w http.ResponseWriter, r *http.Requ
 }
 
 type VerifierResultResponse struct {
-	Household rules.Household `json:"household"`
-	// Disclosed lists the credentials the user disclosed.
-	Disclosed  []string         `json:"disclosed"`
+	Household  rules.Household  `json:"household"`
 	Evaluation rules.Evaluation `json:"evaluation"`
 }
 
@@ -289,9 +289,14 @@ func handleVerifierResult(state *ServerState, w http.ResponseWriter, r *http.Req
 		respondWithErr(w, http.StatusBadRequest, ErrorInvalidProof, "disclosure not valid", nil, "endpoint", endpoint, "type", result.Type, "proof_status", result.ProofStatus)
 		return
 	}
-	facts, disclosed, err := state.verifier.readFacts(result.Disclosed)
+	facts, err := state.verifier.readFacts(result.Disclosed)
 	if err != nil {
-		respondWithErr(w, http.StatusBadRequest, ErrorInvalidProof, "unexpected attribute value", err, "endpoint", endpoint)
+		respondWithErr(w, http.StatusBadRequest, ErrorInvalidProof, "unexpected disclosure", err, "endpoint", endpoint)
+		return
+	}
+	evaluation, err := rules.Evaluate(session.Verification.Household, facts, time.Now())
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to evaluate rules", err, "endpoint", endpoint)
 		return
 	}
 
@@ -300,12 +305,11 @@ func handleVerifierResult(state *ServerState, w http.ResponseWriter, r *http.Req
 	}
 	setVerifierCookie(state, w, "", -1)
 
-	slog.Info("evaluated disclosed attributes", "credentials", disclosed)
+	slog.Info("evaluated disclosed attributes", "law_version", evaluation.Source.Version)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJson(w, http.StatusOK, VerifierResultResponse{
 		Household:  session.Verification.Household,
-		Disclosed:  disclosed,
-		Evaluation: rules.Evaluate(session.Verification.Household, facts),
+		Evaluation: evaluation,
 	})
 }
 
