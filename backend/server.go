@@ -66,6 +66,8 @@ type ServerState struct {
 	trustedProxies []*net.IPNet
 	// staticPath is the directory with the built frontend.
 	staticPath string
+	// verifier is the demo verifier, nil when it is disabled.
+	verifier *Verifier
 }
 
 type SpaHandler struct {
@@ -152,6 +154,13 @@ func NewServer(state *ServerState, config ServerConfig) (*Server, error) {
 	router.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {
 		handleDelete(state, w, r)
 	}).Methods(http.MethodDelete)
+
+	router.HandleFunc("/api/verifier/start", func(w http.ResponseWriter, r *http.Request) {
+		handleVerifierStart(state, w, r)
+	}).Methods(http.MethodPost)
+	router.HandleFunc("/api/verifier/result", func(w http.ResponseWriter, r *http.Request) {
+		handleVerifierResult(state, w, r)
+	}).Methods(http.MethodGet)
 
 	staticPath := state.staticPath
 	if staticPath == "" {

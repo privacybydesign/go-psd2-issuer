@@ -52,3 +52,58 @@ export interface Definitions {
   period_attributes: AttributeDefinition[];
   credentials: CredentialDefinition[];
 }
+
+// Demo verifier, see backend/rules.
+
+export type AgeGroup = 'under21' | 'adult' | 'pension';
+
+export interface Household {
+  age_group: AgeGroup;
+  partner: boolean;
+  partner_pension_age: boolean;
+  housemates: number;
+}
+
+export interface VerifierStartResponse {
+  sessionPtr: unknown;
+  frontendRequest?: unknown;
+}
+
+export interface IncomeItem {
+  // "<credential>.<attribute>", e.g. "income.salary"
+  attribute: string;
+  // euro cents per month
+  amount: number;
+  article?: string;
+  reason?: 'awir' | 'assessed' | 'negative';
+}
+
+export interface RuleStep {
+  key: string;
+  article?: string;
+  // euro cents, or a count for cost_sharers
+  amount: number;
+}
+
+export type Outcome = 'indication' | 'no_indication' | 'not_evaluated';
+
+export interface RuleResult {
+  rule: 'bijstand' | 'aio' | 'minima';
+  outcome: Outcome;
+  steps?: RuleStep[];
+  notes?: string[];
+}
+
+export interface Evaluation {
+  source: { law: string; bwb_id: string; version: string; url: string };
+  counted: IncomeItem[];
+  excluded: IncomeItem[];
+  income: number;
+  results: RuleResult[];
+}
+
+export interface VerifierResult {
+  household: Household;
+  disclosed: string[] | null;
+  evaluation: Evaluation;
+}

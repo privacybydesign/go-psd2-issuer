@@ -26,6 +26,9 @@ const (
 	StatusReady = "ready"
 	// StatusFailed: the flow failed, see Session.Error.
 	StatusFailed = "failed"
+	// StatusVerifying: a demo verifier session, see Session.Verification.
+	// The issuance flow never enters or leaves it.
+	StatusVerifying = "verifying"
 )
 
 // SessionTTL bounds how long a session, including the computed credential
@@ -53,6 +56,8 @@ type Session struct {
 	LastCheckedAt time.Time `json:"last_checked_at"`
 	// TransientErrors counts consecutive failed calls to enablenow.
 	TransientErrors int `json:"transient_errors,omitempty"`
+	// Verification is set on demo verifier sessions only.
+	Verification *Verification `json:"verification,omitempty"`
 }
 
 func NewSession(now time.Time) *Session {

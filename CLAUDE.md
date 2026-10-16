@@ -25,6 +25,10 @@ monthly averages), plus bankaccount. Modeled on go-sms-issuer.
   checks the backend and scheme agree.
 - `backend/enablenow/`: API client (`HttpClient`) and `FakeClient`.
 - `backend/flow.go`: poll-driven state machine; no background goroutines.
+- `backend/rules/` + `backend/verifier.go`: demo verifier (Participatiewet
+  indication on disclosed attributes). Norms are copied from the
+  regelrecht-corpus text; update `rules.Participatiewet` and the constants
+  when the norms change (every January and July).
 
 ## Gotchas
 

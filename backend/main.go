@@ -52,6 +52,9 @@ type Config struct {
 	// TrustedProxies lists CIDR ranges of reverse proxies allowed to set the
 	// X-Real-IP header.
 	TrustedProxies []string `json:"trusted_proxies"`
+
+	// DemoVerifier enables the demo verifier at /<lang>/verifier.
+	DemoVerifier DemoVerifierConfig `json:"demo_verifier"`
 }
 
 type CategorizationConf struct {
@@ -152,6 +155,19 @@ func createServerState(config *Config) (*ServerState, error) {
 		return nil, fmt.Errorf("failed to parse trusted_proxies: %w", err)
 	}
 
+	var verifier *Verifier
+	if config.DemoVerifier.Enabled {
+		irmaServerUrl := config.DemoVerifier.IrmaServerUrl
+		if irmaServerUrl == "" {
+			irmaServerUrl = config.IrmaServerUrl
+		}
+		verifier, err = NewVerifier(irmaServerUrl, jwtCreator, credentialIds)
+		if err != nil {
+			return nil, fmt.Errorf("failed to instantiate demo verifier: %w", err)
+		}
+		slog.Info("demo verifier enabled", "irma_server_url", irmaServerUrl)
+	}
+
 	return &ServerState{
 		irmaServerURL:    config.IrmaServerUrl,
 		publicURL:        config.PublicUrl,
@@ -162,6 +178,7 @@ func createServerState(config *Config) (*ServerState, error) {
 		jwtCreator:       jwtCreator,
 		startRateLimiter: startRateLimiter,
 		trustedProxies:   trustedProxies,
+		verifier:         verifier,
 	}, nil
 }
 
