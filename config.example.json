@@ -40,5 +40,8 @@
         "master_name": "mymaster",
         "namespace": "psd2-issuer"
     },
-    "trusted_proxies": []
+    "trusted_proxies": [],
+    "demo_verifier": {
+        "enabled": false
+    }
 }

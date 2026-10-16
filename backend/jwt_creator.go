@@ -73,8 +73,14 @@ func (jc *DefaultJwtCreator) CreateJwt(creds []credentials.Credential) (string, 
 		})
 	}
 
+	return jc.SignRequest(irma.NewIssuanceRequest(requests))
+}
+
+// SignRequest signs any session request as this requestor, e.g. the
+// disclosure request of the demo verifier.
+func (jc *DefaultJwtCreator) SignRequest(request irma.SessionRequest) (string, error) {
 	return irma.SignSessionRequest(
-		irma.NewIssuanceRequest(requests),
+		request,
 		jwt.GetSigningMethod(jwt.SigningMethodRS256.Alg()),
 		jc.privateKey,
 		jc.issuerId,
