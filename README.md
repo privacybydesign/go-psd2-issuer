@@ -112,37 +112,48 @@ expires after 30 minutes or when the user finishes.
 ## Demo verifier
 
 `/<lang>/verifier` (e.g. `/nl/verifier`) is a demo verifier that gives an
-indication of eligibility for social assistance and similar schemes, based
-on the [Participatiewet](https://wetten.overheid.nl/BWBR0015703) as
-published in [regelrecht-corpus](https://github.com/MinBZK/regelrecht-corpus),
-using the version in force on the day of the check (`rules.Versions`:
-2026-04-03 and 2026-07-01). The user declares their household (age group,
-partner, cost-sharing housemates), which the bank data does not contain, and
-discloses exactly the attributes the law counts as income, all required. The
-rules live in [`backend/rules`](backend/rules):
+indication of eligibility for social security schemes. The user chooses a
+law, and the verifier asks with Yivi for exactly the attributes that law
+needs (all required) plus the date of birth, from which the age group and
+the state pension age (art. 7a AOW) follow. The household (partner,
+cost-sharing housemates) is not in a credential yet, so the user declares
+it. The laws live in [`backend/rules`](backend/rules) (`rules.Laws`) and
+follow the texts in [regelrecht-corpus](https://github.com/MinBZK/regelrecht-corpus),
+using the versions in force on the day of the check:
 
-- **Income** (art. 31, 32): the net monthly averages of work, pension,
-  rental income, social security benefits, alimony and tax refunds; negative
-  net amounts do not count. The Awir allowances (`subsidy.family`,
-  `subsidy.health`, `subsidy.rent`, art. 31.2.d) and the bijstand itself
-  (`subsidy.social`, `subsidy.socialother`) are no income, so they are not
-  asked for.
-- **Bijstand** (21 or older, art. 21) or **AIO supplement** (state pension
-  age, art. 22): the norm for a single person or couple, or the
-  cost-sharing norm (art. 22a), minus the income.
-- **Municipal minima schemes**: income at most 120% of that norm, as an
-  example; every municipality sets its own limit.
+| Law (`rules.Laws`) | Rules | Outcome |
+|---|---|---|
+| `bijstand` | Participatiewet: income per art. 31, 32; norm per art. 21, 22 or the cost-sharing norm of art. 22a | norm minus income; from the state pension age the AIO supplement |
+| `minima` | as `bijstand` | income at most 120% of the norm (example; every municipality sets its own limit) |
+| `kwijtschelding_gemeente` | Uitvoeringsregeling Invorderingswet 1990, art. 11-16 and 27-28: net disposable income (art. 14) minus housing costs above the basishuur of the Wet op de huurtoeslag, paid taxes and alimony (art. 15), minus 90% of the norm as cost of living (art. 16) | no payment capacity: full remission; otherwise at most 80% of 12 months of payment capacity is paid (art. 11), the rest of the assessment is remitted |
+| `kwijtschelding_hhnk` | as `kwijtschelding_gemeente`, with 100% of the norm as cost of living (Kwijtscheldingsregeling waterschapsbelastingen HHNK 2023) | as above; pensioners are not evaluated (art. 2.2 refers to a regulation that is not in the corpus) |
 
-The result is an indication, not a decision. Assets (art. 34), the youth
-norms (art. 20), the exclusion grounds of art. 13 and the income of a
-partner who is not on the disclosed cards are not checked, and the income is
-a 12-month average rather than the income per month.
+Attributes that do not count are not asked for: e.g. the Awir allowances
+for bijstand (art. 31.2.d), and kindgebonden budget, zorgtoeslag and the
+individuele inkomenstoeslag for kwijtschelding (art. 14.1.c). `GET
+/api/verifier/laws` lists what each law asks for, which the page shows
+before the user shares anything.
+
+The result is an indication, not a decision. Not checked are: assets
+(art. 34 Participatiewet, art. 12 Uitvoeringsregeling), the youth norms
+(art. 20), the exclusion grounds of art. 13, the income of a partner who is
+not on the disclosed cards, the health premium above the normpremie
+(art. 15.1.c) and the costs of children (art. 15.1.g). The amounts are
+12-month averages, not the income per month or the expected income of the
+coming 12 months.
+
+The norms are copied from the corpus: `rules.Versions` (Participatiewet,
+every 1 January and 1 July) and `rules.KwijtscheldingVersions` (maximum rent
+and basishuur, every 1 January) need a new entry when the amounts change;
+until then the last version keeps being used.
 
 The backend starts the disclosure session at the IRMA server (as requestor
 `issuer_id`, signed with the same key) and fetches the result itself, so the
-browser never sees the requestor token and cannot alter the disclosed values.
-It is off unless `demo_verifier.enabled` is set. The IRMA server requestor
-then also needs `"disclose_perms": ["irma-demo.enablenow.*"]` (see below).
+browser never sees the requestor token and cannot alter the disclosed values;
+the date of birth is not returned to the browser. It is off unless
+`demo_verifier.enabled` is set. The IRMA server requestor then also needs
+`disclose_perms` for `irma-demo.enablenow.*` and the date of birth attribute
+(see below).
 
 ## Running locally
 
@@ -192,7 +203,10 @@ See [`config.example.json`](config.example.json).
 - `storage_type`: `memory`, `redis` or `redis_sentinel`.
 - `demo_verifier`: `enabled` (false) turns on the demo verifier;
   `irma_server_url` is the IRMA server as reached from the backend (e.g.
-  `http://irma:8088` in Docker Compose), by default `irma_server_url`.
+  `http://irma:8088` in Docker Compose), by default `irma_server_url`;
+  `date_of_birth_attribute` is the attribute the age comes from, by default
+  `irma-demo.gemeente.personalData.dateofbirth` (e.g.
+  `pbdf.gemeente.personalData.dateofbirth` in production).
 - `trusted_proxies`: CIDR ranges of reverse proxies allowed to set
   `X-Real-IP`, used for rate limiting session starts (20 per IP per 30 min).
 
@@ -222,7 +236,10 @@ IRMA server requestor config (`local-secrets/irma-server/config.json`):
                 "irma-demo.enablenow.other",
                 "irma-demo.enablenow.bankaccount"
             ],
-            "disclose_perms": ["irma-demo.enablenow.*"]
+            "disclose_perms": [
+                "irma-demo.enablenow.*",
+                "irma-demo.gemeente.personalData.dateofbirth"
+            ]
         }
     }
 }
@@ -238,8 +255,9 @@ IRMA server requestor config (`local-secrets/irma-server/config.json`):
 | `GET /api/session/status` | advances the flow; `{status, error?, credentials?}` with status `awaiting_consent`, `awaiting_transactions`, `categorizing`, `ready` or `failed` |
 | `POST /api/session/issue` | `{credentials: ["income", ...]}`; returns `{jwt, irma_server_url}` |
 | `DELETE /api/session` | forget the session (and delete an in-progress consent) |
-| `POST /api/verifier/start` | demo verifier: `{household: {age_group, partner, partner_pension_age, housemates}}`; returns `{sessionPtr, frontendRequest}` and sets the verifier cookie |
-| `GET /api/verifier/result` | demo verifier: fetches the disclosure from the IRMA server and returns `{household, disclosed, evaluation}` |
+| `GET /api/verifier/laws` | demo verifier: the laws with the attributes each asks for |
+| `POST /api/verifier/start` | demo verifier: `{law, household: {partner, partner_pension_age, housemates}, tax_assessment?}`; returns `{sessionPtr, frontendRequest}` and sets the verifier cookie |
+| `GET /api/verifier/result` | demo verifier: fetches the disclosure from the IRMA server and returns `{household, age_group, tax_assessment, evaluation}` |
 
 Errors are plain-text codes such as `error:session-not-found`,
 `error:bank-connection`, `error:no-transactions` or `error:timeout`.

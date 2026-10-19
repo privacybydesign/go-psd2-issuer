@@ -57,11 +57,19 @@ export interface Definitions {
 
 export type AgeGroup = 'under21' | 'adult' | 'pension';
 
+// Declared by the user; the age comes from the date of birth credential.
 export interface Household {
-  age_group: AgeGroup;
   partner: boolean;
   partner_pension_age: boolean;
   housemates: number;
+}
+
+export interface VerifierLaw {
+  id: string;
+  // the attributes the law asks for, e.g. "income.salary"; the date of birth
+  // comes on top
+  attributes: string[];
+  needs_tax_assessment: boolean;
 }
 
 export interface VerifierStartResponse {
@@ -69,40 +77,54 @@ export interface VerifierStartResponse {
   frontendRequest?: unknown;
 }
 
+export interface Source {
+  id: string;
+  name: string;
+  version: string;
+  url: string;
+}
+
 export interface IncomeItem {
-  // "<credential>.<attribute>", e.g. "income.salary"
+  // "<credential>.<attribute>", e.g. "income.salary", or "housing"
   attribute: string;
   // euro cents per month
   amount: number;
+  law?: string;
   article?: string;
   reason?: 'negative';
 }
 
 export interface RuleStep {
   key: string;
+  law?: string;
   article?: string;
-  // euro cents, or a count for cost_sharers
+  // euro cents, a count for cost_sharers or a percentage for
+  // cost_of_living_percentage
   amount: number;
 }
 
-export type Outcome = 'indication' | 'no_indication' | 'not_evaluated';
+export type Outcome = 'indication' | 'partial' | 'no_indication' | 'not_evaluated';
 
 export interface RuleResult {
-  rule: 'bijstand' | 'aio' | 'minima';
+  rule: string;
   outcome: Outcome;
   steps?: RuleStep[];
   notes?: string[];
 }
 
 export interface Evaluation {
-  source: { law: string; bwb_id: string; version: string; url: string };
+  law: string;
+  sources: Source[];
   counted: IncomeItem[];
   excluded: IncomeItem[];
+  expenses?: IncomeItem[];
   income: number;
-  results: RuleResult[];
+  result: RuleResult;
 }
 
 export interface VerifierResult {
   household: Household;
+  age_group: AgeGroup;
+  tax_assessment?: number;
   evaluation: Evaluation;
 }

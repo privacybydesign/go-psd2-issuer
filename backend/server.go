@@ -155,6 +155,9 @@ func NewServer(state *ServerState, config ServerConfig) (*Server, error) {
 		handleDelete(state, w, r)
 	}).Methods(http.MethodDelete)
 
+	router.HandleFunc("/api/verifier/laws", func(w http.ResponseWriter, r *http.Request) {
+		handleVerifierLaws(state, w, r)
+	}).Methods(http.MethodGet)
 	router.HandleFunc("/api/verifier/start", func(w http.ResponseWriter, r *http.Request) {
 		handleVerifierStart(state, w, r)
 	}).Methods(http.MethodPost)
