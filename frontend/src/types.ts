@@ -52,3 +52,79 @@ export interface Definitions {
   period_attributes: AttributeDefinition[];
   credentials: CredentialDefinition[];
 }
+
+// Demo verifier, see backend/rules.
+
+export type AgeGroup = 'under21' | 'adult' | 'pension';
+
+// Declared by the user; the age comes from the date of birth credential.
+export interface Household {
+  partner: boolean;
+  partner_pension_age: boolean;
+  housemates: number;
+}
+
+export interface VerifierLaw {
+  id: string;
+  // the attributes the law asks for, e.g. "income.salary"; the date of birth
+  // comes on top
+  attributes: string[];
+  needs_tax_assessment: boolean;
+}
+
+export interface VerifierStartResponse {
+  sessionPtr: unknown;
+  frontendRequest?: unknown;
+}
+
+export interface Source {
+  id: string;
+  name: string;
+  version: string;
+  url: string;
+}
+
+export interface IncomeItem {
+  // "<credential>.<attribute>", e.g. "income.salary", or "housing"
+  attribute: string;
+  // euro cents per month
+  amount: number;
+  law?: string;
+  article?: string;
+  reason?: 'negative';
+}
+
+export interface RuleStep {
+  key: string;
+  law?: string;
+  article?: string;
+  // euro cents, a count for cost_sharers or a percentage for
+  // cost_of_living_percentage
+  amount: number;
+}
+
+export type Outcome = 'indication' | 'partial' | 'no_indication' | 'not_evaluated';
+
+export interface RuleResult {
+  rule: string;
+  outcome: Outcome;
+  steps?: RuleStep[];
+  notes?: string[];
+}
+
+export interface Evaluation {
+  law: string;
+  sources: Source[];
+  counted: IncomeItem[];
+  excluded: IncomeItem[];
+  expenses?: IncomeItem[];
+  income: number;
+  result: RuleResult;
+}
+
+export interface VerifierResult {
+  household: Household;
+  age_group: AgeGroup;
+  tax_assessment?: number;
+  evaluation: Evaluation;
+}

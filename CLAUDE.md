@@ -25,6 +25,13 @@ monthly averages), plus bankaccount. Modeled on go-sms-issuer.
   checks the backend and scheme agree.
 - `backend/enablenow/`: API client (`HttpClient`) and `FakeClient`.
 - `backend/flow.go`: poll-driven state machine; no background goroutines.
+- `backend/rules/` + `backend/verifier.go`: demo verifier. Each law in
+  `rules.Laws` lists the attributes it needs; the verifier asks for exactly
+  those (all required) plus the date of birth, so add an attribute to a law
+  only when its rules use it. Amounts are copied from the regelrecht-corpus
+  texts into `rules.Versions` (Participatiewet, every January and July) and
+  `rules.KwijtscheldingVersions` (huurtoeslag amounts, every January); add the
+  new version when they change, otherwise the last one keeps being used.
 
 ## Gotchas
 

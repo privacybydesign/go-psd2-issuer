@@ -8,6 +8,7 @@ import ProgressPage from './pages/Progress';
 import ReviewPage from './pages/Review';
 import ErrorPage from './pages/Error';
 import DonePage from './pages/Done';
+import VerifierPage from './pages/Verifier';
 import { rememberLanguage } from './language';
 
 import './i18n';
@@ -33,6 +34,7 @@ function LanguageRouter() {
       <Route path="/review" element={<ReviewPage />} />
       <Route path="/error" element={<ErrorPage />} />
       <Route path="/done" element={<DonePage />} />
+      <Route path="/verifier" element={<VerifierPage />} />
     </Routes>
   );
 }

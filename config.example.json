@@ -40,5 +40,9 @@
         "master_name": "mymaster",
         "namespace": "psd2-issuer"
     },
-    "trusted_proxies": []
+    "trusted_proxies": [],
+    "demo_verifier": {
+        "enabled": false,
+        "date_of_birth_attribute": "irma-demo.gemeente.personalData.dateofbirth"
+    }
 }
