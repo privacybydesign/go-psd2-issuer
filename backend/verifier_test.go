@@ -59,9 +59,13 @@ func disclosed(id, value string) map[string]any {
 	return map[string]any{"id": id, "rawvalue": value, "value": map[string]string{"": value}, "status": "PRESENT", "issuancetime": 1760000000}
 }
 
-// disclosure discloses every attribute a law needs, as 0 unless given in
-// values, grouped per credential like the request, plus the date of birth.
-func disclosure(law rules.Law, dateOfBirth string, values map[string]string) [][]any {
+// testPostcode is the postcode disclosed for the laws that need one.
+const testPostcode = "6525 EC"
+
+// testDisclosure discloses every attribute a law needs, as 0 unless given
+// in values, grouped per credential like the request, plus the date of
+// birth and, if the law needs it, the postcode.
+func testDisclosure(law rules.Law, dateOfBirth string, values map[string]string) [][]any {
 	var cons [][]any
 	byCredential := map[string]int{}
 	for _, fact := range law.Attributes {
@@ -78,7 +82,11 @@ func disclosure(law rules.Law, dateOfBirth string, values map[string]string) [][
 		}
 		cons[i] = append(cons[i], disclosed("irma-demo.enablenow."+fact, value))
 	}
-	return append(cons, []any{disclosed(DefaultDateOfBirthAttribute, dateOfBirth)})
+	cons = append(cons, []any{disclosed(DefaultDateOfBirthAttribute, dateOfBirth)})
+	if law.NeedsPostcode {
+		cons = append(cons, []any{disclosed(DefaultPostcodeAttribute, testPostcode)})
+	}
+	return cons
 }
 
 func newVerifierTestEnv(t *testing.T) (*testEnv, *fakeIrmaServer) {
@@ -89,7 +97,7 @@ func newVerifierTestEnv(t *testing.T) (*testEnv, *fakeIrmaServer) {
 	for _, key := range credentials.AllKeys {
 		ids[key] = "irma-demo.enablenow." + key
 	}
-	verifier, err := NewVerifier(irmaServer.server.URL+"/", env.state.jwtCreator.(*DefaultJwtCreator), ids, "")
+	verifier, err := NewVerifier(irmaServer.server.URL+"/", env.state.jwtCreator.(*DefaultJwtCreator), ids, "", "")
 	require.NoError(t, err)
 	env.state.verifier = verifier
 	return env, irmaServer
@@ -125,6 +133,9 @@ func TestVerifierLaws(t *testing.T) {
 	require.Len(t, laws, len(rules.Laws))
 	require.Equal(t, "bijstand", laws[0].Id)
 	require.Contains(t, laws[0].Attributes, "income.salary")
+	require.Equal(t, []string{"income_norm", "municipality"}, laws[0].Checked)
+	require.True(t, laws[0].NeedsPostcode)
+	require.Contains(t, laws[0].NotChecked, "assets")
 }
 
 func TestVerifierBijstandFlow(t *testing.T) {
@@ -139,14 +150,16 @@ func TestVerifierBijstandFlow(t *testing.T) {
 	require.Contains(t, start, "frontendRequest")
 	require.NotContains(t, string(body), "requestor-token")
 
-	// exactly the attributes of the law and the date of birth, all required
+	// exactly the attributes of the law, the date of birth and the
+	// postcode, all required
 	attributes := requested(t, irmaServer.request)
-	require.Len(t, attributes, len(law(t, "bijstand").Attributes)+1)
+	require.Len(t, attributes, len(law(t, "bijstand").Attributes)+2)
 	require.Contains(t, attributes, "irma-demo.enablenow.income.salary")
 	require.Contains(t, attributes, DefaultDateOfBirthAttribute)
+	require.Contains(t, attributes, DefaultPostcodeAttribute)
 	require.NotContains(t, attributes, "irma-demo.enablenow.subsidy.rent")
 
-	irmaServer.result["disclosed"] = disclosure(law(t, "bijstand"), "15-03-1985", map[string]string{"income.salary": "900"})
+	irmaServer.result["disclosed"] = testDisclosure(law(t, "bijstand"), "15-03-1985", map[string]string{"income.salary": "900"})
 	resp, body = env.do(t, http.MethodGet, "/api/verifier/result", nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	var result VerifierResultResponse
@@ -157,6 +170,8 @@ func TestVerifierBijstandFlow(t *testing.T) {
 	require.Equal(t, "bijstand", result.Evaluation.Law)
 	require.Equal(t, int64(90000), result.Evaluation.Income)
 	require.Equal(t, rules.OutcomeIndication, result.Evaluation.Result.Outcome)
+	// where the applicant lives, from the postcode
+	require.Contains(t, result.Evaluation.Result.Criteria, rules.Criterion{Key: "municipality", Status: rules.CriterionMet, Law: "participatiewet", Article: "40", Value: testPostcode})
 
 	// the session is forgotten once the result is fetched
 	resp, body = env.do(t, http.MethodGet, "/api/verifier/result", nil)
@@ -169,7 +184,7 @@ func TestVerifierAgeComesFromTheDateOfBirth(t *testing.T) {
 	resp, body := env.do(t, http.MethodPost, "/api/verifier/start", VerifierStartPayload{Law: "bijstand"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
-	irmaServer.result["disclosed"] = disclosure(law(t, "bijstand"), "1940-01-01", map[string]string{"income.pensionstate": "1200"})
+	irmaServer.result["disclosed"] = testDisclosure(law(t, "bijstand"), "1940-01-01", map[string]string{"income.pensionstate": "1200"})
 	resp, body = env.do(t, http.MethodGet, "/api/verifier/result", nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	var result VerifierResultResponse
@@ -185,8 +200,11 @@ func TestVerifierKwijtschelding(t *testing.T) {
 	attributes := requested(t, irmaServer.request)
 	require.Contains(t, attributes, "irma-demo.enablenow.housing.rent")
 	require.Contains(t, attributes, "irma-demo.enablenow.subsidy.rent")
+	// remission does not depend on where you live, so the postcode is not
+	// asked for
+	require.NotContains(t, attributes, DefaultPostcodeAttribute)
 
-	irmaServer.result["disclosed"] = disclosure(law(t, "kwijtschelding_gemeente"), "15-03-1985", map[string]string{
+	irmaServer.result["disclosed"] = testDisclosure(law(t, "kwijtschelding_gemeente"), "15-03-1985", map[string]string{
 		"income.salary": "1600", "housing.rent": "-900", "subsidy.rent": "250",
 	})
 	resp, body = env.do(t, http.MethodGet, "/api/verifier/result", nil)
@@ -202,8 +220,8 @@ func TestVerifierRejectsIncompleteDisclosure(t *testing.T) {
 	resp, body := env.do(t, http.MethodPost, "/api/verifier/start", VerifierStartPayload{Law: "bijstand"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
-	// without the date of birth
-	cons := disclosure(law(t, "bijstand"), "15-03-1985", nil)
+	// without the postcode
+	cons := testDisclosure(law(t, "bijstand"), "15-03-1985", nil)
 	irmaServer.result["disclosed"] = cons[:len(cons)-1]
 	resp, body = env.do(t, http.MethodGet, "/api/verifier/result", nil)
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)

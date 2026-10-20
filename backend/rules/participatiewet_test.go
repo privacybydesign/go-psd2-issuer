@@ -151,7 +151,65 @@ func TestUnder21IsNotEvaluated(t *testing.T) {
 
 func TestBijstandNotes(t *testing.T) {
 	result := evaluate(t, bijstandLaw, Household{Partner: true}, AgeAdult, Facts{"subsidy.student": 300, "alimony.other": 200}).Result
-	require.Equal(t, []string{"note_assets", "note_average", "note_partner_income", "note_student", "note_alimony"}, result.Notes)
+	require.Equal(t, []string{"note_average", "note_partner_income", "note_student", "note_alimony"}, result.Notes)
+}
+
+// criterion returns the status of a criterion, or "" when it is absent.
+func criterion(result Result, key string) string {
+	for _, c := range result.Criteria {
+		if c.Key == key {
+			return c.Status
+		}
+	}
+	return ""
+}
+
+func TestBijstandCriteria(t *testing.T) {
+	result := evaluate(t, bijstandLaw, Household{}, AgeAdult, Facts{"income.salary": 1000}).Result
+	require.Equal(t, Criterion{Key: "income_norm", Status: CriterionMet, Law: participatiewet, Article: "19.1", Amount: 100000, Limit: 141946}, result.Criteria[0])
+	// what the bank data cannot tell is left to the municipality
+	for _, key := range []string{"household", "assets", "residence", "exclusions", "obligations"} {
+		require.Equal(t, CriterionNotChecked, criterion(result, key), key)
+	}
+	// where the applicant lives follows from the postcode; any postcode
+	// counts in the demo
+	require.Equal(t, CriterionMet, criterion(result, "municipality"))
+
+	result = evaluate(t, bijstandLaw, Household{}, AgeAdult, Facts{"income.salary": 1500}).Result
+	require.Equal(t, CriterionNotMet, criterion(result, "income_norm"))
+
+	// the SVB pays the AIO supplement, wherever you live and without work
+	// obligations
+	result = evaluate(t, bijstandLaw, Household{}, AgePension, Facts{}).Result
+	require.Equal(t, CriterionMet, criterion(result, "income_norm"))
+	require.Empty(t, criterion(result, "obligations"))
+	require.Empty(t, criterion(result, "municipality"))
+
+	result = evaluate(t, minimaLaw, Household{}, AgeAdult, Facts{"income.salary": 1750}).Result
+	require.Equal(t, CriterionNotMet, criterion(result, "income_minima"))
+	require.Equal(t, CriterionNotChecked, criterion(result, "local_limit"))
+
+	for _, law := range Laws {
+		result := evaluate(t, law, Household{}, AgeUnder21, Facts{}).Result
+		for _, c := range result.Criteria {
+			if c.Key != "municipality" {
+				require.Equal(t, CriterionNotChecked, c.Status, law.Id+" "+c.Key)
+			}
+		}
+	}
+}
+
+func TestLawCriteria(t *testing.T) {
+	checked, unchecked, err := bijstandLaw.Criteria(day(today))
+	require.NoError(t, err)
+	require.Equal(t, []string{"income_norm", "municipality"}, checked)
+	require.Contains(t, unchecked, "assets")
+	for _, law := range Laws {
+		checked, unchecked, err := law.Criteria(day(today))
+		require.NoError(t, err)
+		require.NotEmpty(t, checked, law.Id)
+		require.NotEmpty(t, unchecked, law.Id)
+	}
 }
 
 func TestValidate(t *testing.T) {

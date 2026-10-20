@@ -31,6 +31,8 @@ func TestKwijtschelding(t *testing.T) {
 	evaluation := kwijtschelding(t, kwijtscheldingGemeenteLaw, Household{}, AgeAdult, facts, 0)
 	result := evaluation.Result
 	require.Equal(t, OutcomeIndication, result.Outcome)
+	require.Equal(t, CriterionMet, criterion(result, "payment_capacity"))
+	require.Equal(t, CriterionNotChecked, criterion(result, "kwijtschelding_assets"))
 	require.Equal(t, int64(43548), stepAmount(t, result, "housing_deduction"))
 	require.Equal(t, int64(116452), stepAmount(t, result, "disposable_income"))
 	require.Equal(t, int64(127751), stepAmount(t, result, "cost_of_living"))
@@ -47,10 +49,12 @@ func TestKwijtschelding(t *testing.T) {
 
 	result = kwijtschelding(t, kwijtscheldingGemeenteLaw, Household{}, AgeAdult, facts, 3000).Result
 	require.Equal(t, OutcomePartial, result.Outcome)
+	require.Equal(t, CriterionPartial, criterion(result, "payment_capacity"))
 	require.Equal(t, int64(300000-275529), stepAmount(t, result, "remitted"))
 
 	result = kwijtschelding(t, kwijtscheldingGemeenteLaw, Household{}, AgeAdult, facts, 400).Result
 	require.Equal(t, OutcomeNoIndication, result.Outcome)
+	require.Equal(t, CriterionNotMet, criterion(result, "payment_capacity"))
 	require.Equal(t, int64(0), stepAmount(t, result, "remitted"))
 
 	// HHNK counts 100% of the norm as cost of living: 1564,52 - 1419,46
@@ -91,12 +95,46 @@ func TestKwijtschelding_IncomeAndExpenses(t *testing.T) {
 
 func TestKwijtschelding_AttributesLeaveOutWhatDoesNotCount(t *testing.T) {
 	for _, law := range []Law{kwijtscheldingGemeenteLaw, kwijtscheldingHhnkLaw} {
-		require.Contains(t, law.Attributes, "subsidy.rent")
-		require.Contains(t, law.Attributes, "housing.rent")
-		for _, attribute := range []string{"subsidy.family", "subsidy.health", "subsidy.socialother"} {
-			require.NotContains(t, law.Attributes, attribute)
+		// the allowances lower the costs they are for
+		for _, attribute := range []string{"housing.rent", "subsidy.rent", "insurance.health", "subsidy.health"} {
+			require.Contains(t, law.Attributes, attribute)
 		}
+		require.NotContains(t, law.Attributes, "subsidy.socialother")
+		require.False(t, law.NeedsPostcode)
 	}
+	// only the municipality has decided to count childcare (art. 28.3)
+	require.Contains(t, kwijtscheldingGemeenteLaw.Attributes, "essential.childcare")
+	require.Contains(t, kwijtscheldingGemeenteLaw.Attributes, "subsidy.family")
+	require.NotContains(t, kwijtscheldingHhnkLaw.Attributes, "essential.childcare")
+	require.NotContains(t, kwijtscheldingHhnkLaw.Attributes, "subsidy.family")
+}
+
+func TestKwijtschelding_HealthPremium(t *testing.T) {
+	// premium 200 - normpremie 47,38 - zorgtoeslag 120 = 32,62 (art. 15.1.c)
+	facts := Facts{"insurance.health": -200, "subsidy.health": 120}
+	evaluation := kwijtschelding(t, kwijtscheldingGemeenteLaw, Household{}, AgeAdult, facts, 0)
+	require.Equal(t, int64(4738), stepAmount(t, evaluation.Result, "normpremie"))
+	require.Equal(t, []Item{{Attribute: "insurance.health", Amount: 3262, Law: uri, Article: "15.1.c"}}, evaluation.Expenses)
+	require.Equal(t, Criterion{Key: "health_premium", Status: CriterionCounted, Law: uri, Article: "15.1.c", Amount: 3262}, evaluation.Result.Criteria[1])
+
+	// a couple has the normpremie of a couple; usually nothing is left
+	evaluation = kwijtschelding(t, kwijtscheldingGemeenteLaw, Household{Partner: true}, AgeAdult, facts, 0)
+	require.Equal(t, int64(10628), stepAmount(t, evaluation.Result, "normpremie"))
+	require.Empty(t, evaluation.Expenses)
+}
+
+func TestKwijtschelding_Childcare(t *testing.T) {
+	// childcare 600 - allowances 450 (art. 28.3)
+	facts := Facts{"essential.childcare": -600, "subsidy.family": 450}
+	evaluation := kwijtschelding(t, kwijtscheldingGemeenteLaw, Household{}, AgeAdult, facts, 0)
+	require.Equal(t, []Item{{Attribute: "essential.childcare", Amount: 15000, Law: uri, Article: "28.3"}}, evaluation.Expenses)
+	require.Equal(t, CriterionCounted, criterion(evaluation.Result, "childcare"))
+	require.Contains(t, evaluation.Result.Notes, "note_childcare_allowance")
+
+	// HHNK has not decided to count it
+	evaluation = kwijtschelding(t, kwijtscheldingHhnkLaw, Household{}, AgeAdult, facts, 0)
+	require.Empty(t, evaluation.Expenses)
+	require.Equal(t, CriterionNotChecked, criterion(evaluation.Result, "childcare"))
 }
 
 func TestKwijtschelding_HhnkPensionerIsNotEvaluated(t *testing.T) {

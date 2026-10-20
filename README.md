@@ -115,7 +115,10 @@ expires after 30 minutes or when the user finishes.
 indication of eligibility for social security schemes. The user chooses a
 law, and the verifier asks with Yivi for exactly the attributes that law
 needs (all required) plus the date of birth, from which the age group and
-the state pension age (art. 7a AOW) follow. The household (partner,
+the state pension age (art. 7a AOW) follow. `bijstand` and `minima` also
+ask for the postcode of the address card, to check that the applicant
+lives in the municipality (art. 40 Participatiewet); the demo accepts any
+postcode. The household (partner,
 cost-sharing housemates) is not in a credential yet, so the user declares
 it. The laws live in [`backend/rules`](backend/rules) (`rules.Laws`) and
 follow the texts in [regelrecht-corpus](https://github.com/MinBZK/regelrecht-corpus),
@@ -125,26 +128,29 @@ using the versions in force on the day of the check:
 |---|---|---|
 | `bijstand` | Participatiewet: income per art. 31, 32; norm per art. 21, 22 or the cost-sharing norm of art. 22a | norm minus income; from the state pension age the AIO supplement |
 | `minima` | as `bijstand` | income at most 120% of the norm (example; every municipality sets its own limit) |
-| `kwijtschelding_gemeente` | Uitvoeringsregeling Invorderingswet 1990, art. 11-16 and 27-28: net disposable income (art. 14) minus housing costs above the basishuur of the Wet op de huurtoeslag, paid taxes and alimony (art. 15), minus 90% of the norm as cost of living (art. 16) | no payment capacity: full remission; otherwise at most 80% of 12 months of payment capacity is paid (art. 11), the rest of the assessment is remitted |
-| `kwijtschelding_hhnk` | as `kwijtschelding_gemeente`, with 100% of the norm as cost of living (Kwijtscheldingsregeling waterschapsbelastingen HHNK 2023) | as above; pensioners are not evaluated (art. 2.2 refers to a regulation that is not in the corpus) |
+| `kwijtschelding_gemeente` | Uitvoeringsregeling Invorderingswet 1990, art. 11-16 and 27-28: net disposable income (art. 14) minus housing costs above the basishuur of the Wet op de huurtoeslag, paid taxes and alimony, the health premium minus the normpremie and the zorgtoeslag (art. 15), and childcare minus the allowances, as the demo municipality has decided (art. 28.3), minus 90% of the norm as cost of living (art. 16) | no payment capacity: full remission; otherwise at most 80% of 12 months of payment capacity is paid (art. 11), the rest of the assessment is remitted |
+| `kwijtschelding_hhnk` | as `kwijtschelding_gemeente`, without childcare and with 100% of the norm as cost of living (Kwijtscheldingsregeling waterschapsbelastingen HHNK 2023) | as above; pensioners are not evaluated (art. 2.2 refers to a regulation that is not in the corpus) |
 
 Attributes that do not count are not asked for: e.g. the Awir allowances
-for bijstand (art. 31.2.d), and kindgebonden budget, zorgtoeslag and the
-individuele inkomenstoeslag for kwijtschelding (art. 14.1.c). `GET
+for bijstand (art. 31.2.d) and the individuele inkomenstoeslag for
+kwijtschelding (art. 14.1.c). For kwijtschelding the zorgtoeslag and, for
+the municipality, the kinderopvangtoeslag (`subsidy.family`, together with
+the kindgebonden budget) are asked for because they lower the costs. `GET
 /api/verifier/laws` lists what each law asks for, which the page shows
 before the user shares anything.
 
 The result is an indication, not a decision. Not checked are: assets
 (art. 34 Participatiewet, art. 12 Uitvoeringsregeling), the youth norms
 (art. 20), the exclusion grounds of art. 13, the income of a partner who is
-not on the disclosed cards, the health premium above the normpremie
-(art. 15.1.c) and the costs of children (art. 15.1.g). The amounts are
+not on the disclosed cards and the cost of living of children
+(art. 15.1.g: it needs the number of children). The amounts are
 12-month averages, not the income per month or the expected income of the
 coming 12 months.
 
 The norms are copied from the corpus: `rules.Versions` (Participatiewet,
-every 1 January and 1 July) and `rules.KwijtscheldingVersions` (maximum rent
-and basishuur, every 1 January) need a new entry when the amounts change;
+every 1 January and 1 July) and `rules.KwijtscheldingVersions` (maximum rent,
+basishuur and normpremie, every 1 January) need a new entry when the amounts
+change;
 until then the last version keeps being used.
 
 The backend starts the disclosure session at the IRMA server (as requestor
@@ -152,8 +158,8 @@ The backend starts the disclosure session at the IRMA server (as requestor
 browser never sees the requestor token and cannot alter the disclosed values;
 the date of birth is not returned to the browser. It is off unless
 `demo_verifier.enabled` is set. The IRMA server requestor then also needs
-`disclose_perms` for `irma-demo.enablenow.*` and the date of birth attribute
-(see below).
+`disclose_perms` for `irma-demo.enablenow.*`, the date of birth attribute
+and the postcode attribute (see below).
 
 ## Running locally
 
@@ -206,7 +212,10 @@ See [`config.example.json`](config.example.json).
   `http://irma:8088` in Docker Compose), by default `irma_server_url`;
   `date_of_birth_attribute` is the attribute the age comes from, by default
   `irma-demo.gemeente.personalData.dateofbirth` (e.g.
-  `pbdf.gemeente.personalData.dateofbirth` in production).
+  `pbdf.gemeente.personalData.dateofbirth` in production);
+  `postcode_attribute` is the attribute the municipality is checked on, by
+  default `irma-demo.gemeente.address.zipcode` (e.g.
+  `pbdf.gemeente.address.zipcode` in production).
 - `trusted_proxies`: CIDR ranges of reverse proxies allowed to set
   `X-Real-IP`, used for rate limiting session starts (20 per IP per 30 min).
 
@@ -238,7 +247,8 @@ IRMA server requestor config (`local-secrets/irma-server/config.json`):
             ],
             "disclose_perms": [
                 "irma-demo.enablenow.*",
-                "irma-demo.gemeente.personalData.dateofbirth"
+                "irma-demo.gemeente.personalData.dateofbirth",
+                "irma-demo.gemeente.address.zipcode"
             ]
         }
     }

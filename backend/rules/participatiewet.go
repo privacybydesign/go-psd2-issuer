@@ -77,15 +77,17 @@ var bijstandIncome = []incomeRule{
 }
 
 var bijstandLaw = Law{
-	Id:         "bijstand",
-	Attributes: attributesOf(bijstandIncome),
-	evaluate:   evaluateBijstand,
+	Id:            "bijstand",
+	Attributes:    attributesOf(bijstandIncome),
+	NeedsPostcode: true,
+	evaluate:      evaluateBijstand,
 }
 
 var minimaLaw = Law{
-	Id:         "minima",
-	Attributes: attributesOf(bijstandIncome),
-	evaluate:   evaluateMinima,
+	Id:            "minima",
+	Attributes:    attributesOf(bijstandIncome),
+	NeedsPostcode: true,
+	evaluate:      evaluateMinima,
 }
 
 // participatiewetIncome counts the income per art. 32 and returns the norm
@@ -104,6 +106,40 @@ func participatiewetIncome(law string, input Input) (evaluation Evaluation, norm
 	return evaluation, normSteps, norm, true, nil
 }
 
+// municipality is the condition that the applicant lives in the
+// municipality (art. 40), from the postcode of the address. This demo
+// accepts any postcode; a municipality would check it against its own.
+func municipality(postcode string) Criterion {
+	return Criterion{Key: "municipality", Status: CriterionMet, Law: participatiewet, Article: "40", Value: postcode}
+}
+
+// bijstandCriteria are the conditions of the right to bijstand, with the
+// status of the income test and where the applicant lives; the verifier
+// has no data for the others.
+func bijstandCriteria(rule string, income Criterion, postcode string) []Criterion {
+	income.Key, income.Law, income.Article = "income_norm", participatiewet, "19.1"
+	if rule == "aio" {
+		// paid by the SVB, wherever in the Netherlands the applicant lives,
+		// without work obligations
+		return []Criterion{
+			income,
+			notChecked("household", participatiewet, "3"),
+			notChecked("assets", participatiewet, "34"),
+			notChecked("residence", participatiewet, "11"),
+			notChecked("exclusions", participatiewet, "13"),
+		}
+	}
+	return []Criterion{
+		income,
+		municipality(postcode),
+		notChecked("household", participatiewet, "3"),
+		notChecked("assets", participatiewet, "34"),
+		notChecked("residence", participatiewet, "11"),
+		notChecked("exclusions", participatiewet, "13"),
+		notChecked("obligations", participatiewet, "9"),
+	}
+}
+
 // evaluateBijstand: art. 19, the bijstand tops up the income to the norm.
 func evaluateBijstand(input Input) (Evaluation, error) {
 	rule := "bijstand"
@@ -116,11 +152,11 @@ func evaluateBijstand(input Input) (Evaluation, error) {
 		return Evaluation{}, err
 	}
 	if !ok {
-		evaluation.Result = Result{Rule: rule, Outcome: OutcomeNotEvaluated, Notes: []string{"note_under21"}}
+		evaluation.Result = Result{Rule: rule, Outcome: OutcomeNotEvaluated, Criteria: bijstandCriteria(rule, Criterion{Status: CriterionNotChecked}, input.Postcode), Notes: []string{"note_under21"}}
 		return evaluation, nil
 	}
 
-	notes := []string{"note_assets", "note_average"}
+	notes := []string{"note_average"}
 	if input.Household.Partner {
 		notes = append(notes, "note_partner_income")
 	}
@@ -137,11 +173,29 @@ func evaluateBijstand(input Input) (Evaluation, error) {
 		Step{Key: "income", Law: participatiewet, Article: "32", Amount: evaluation.Income},
 		Step{Key: "supplement", Law: participatiewet, Article: "19.1", Amount: supplement},
 	)
+	income := Criterion{Status: CriterionNotMet, Amount: evaluation.Income, Limit: norm}
 	if supplement > 0 {
-		result.Outcome = OutcomeIndication
+		result.Outcome, income.Status = OutcomeIndication, CriterionMet
 	}
+	result.Criteria = bijstandCriteria(rule, income, input.Postcode)
 	evaluation.Result = result
 	return evaluation, nil
+}
+
+// minimaCriteria: the municipality sets its own income limit and asset
+// limit, so only the example income limit and where the applicant lives
+// are checked.
+func minimaCriteria(income Criterion, postcode string) []Criterion {
+	income.Key = "income_minima"
+	place := municipality(postcode)
+	place.Law, place.Article = "", ""
+	return []Criterion{
+		income,
+		place,
+		notChecked("local_limit", "", ""),
+		notChecked("household", participatiewet, "3"),
+		notChecked("local_assets", "", ""),
+	}
 }
 
 // evaluateMinima: income at most MinimaPercentage of the bijstandsnorm.
@@ -151,18 +205,20 @@ func evaluateMinima(input Input) (Evaluation, error) {
 		return Evaluation{}, err
 	}
 	if !ok {
-		evaluation.Result = Result{Rule: "minima", Outcome: OutcomeNotEvaluated, Notes: []string{"note_under21"}}
+		evaluation.Result = Result{Rule: "minima", Outcome: OutcomeNotEvaluated, Criteria: minimaCriteria(Criterion{Status: CriterionNotChecked}, input.Postcode), Notes: []string{"note_under21"}}
 		return evaluation, nil
 	}
 	limit := norm * MinimaPercentage / 100
-	result := Result{Rule: "minima", Outcome: OutcomeNoIndication, Notes: []string{"note_minima", "note_assets"}}
+	result := Result{Rule: "minima", Outcome: OutcomeNoIndication, Notes: []string{"note_average"}}
 	result.Steps = append(normSteps,
 		Step{Key: "minima_limit", Amount: limit},
 		Step{Key: "income", Law: participatiewet, Article: "32", Amount: evaluation.Income},
 	)
+	income := Criterion{Status: CriterionNotMet, Amount: evaluation.Income, Limit: limit}
 	if evaluation.Income <= limit {
-		result.Outcome = OutcomeIndication
+		result.Outcome, income.Status = OutcomeIndication, CriterionMet
 	}
+	result.Criteria = minimaCriteria(income, input.Postcode)
 	evaluation.Result = result
 	return evaluation, nil
 }
