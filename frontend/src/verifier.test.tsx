@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { VerifierResultView, articleUrl } from './pages/Verifier';
 import { Source, VerifierResult } from './types';
 import i18n from './i18n';
@@ -20,6 +20,12 @@ const bijstand: VerifierResult = {
     result: {
       rule: 'bijstand',
       outcome: 'indication',
+      criteria: [
+        { key: 'income_norm', status: 'met', law: 'participatiewet', article: '19.1', amount: 80000, limit: 101390 },
+        { key: 'municipality', status: 'met', law: 'participatiewet', article: '40', value: '6525 EC' },
+        { key: 'household', status: 'not_checked', law: 'participatiewet', article: '3' },
+        { key: 'assets', status: 'not_checked', law: 'participatiewet', article: '34' },
+      ],
       steps: [
         { key: 'cost_sharers', law: 'participatiewet', article: '22a.1', amount: 2 },
         { key: 'norm_cost_sharing', law: 'participatiewet', article: '22a.1.a', amount: 101390 },
@@ -45,6 +51,11 @@ const kwijtschelding: VerifierResult = {
     result: {
       rule: 'kwijtschelding_hhnk',
       outcome: 'partial',
+      criteria: [
+        { key: 'payment_capacity', status: 'partial', law: uri.id, article: '13.1', amount: 14506, limit: 141946 },
+        { key: 'health_premium', status: 'counted', law: uri.id, article: '15.1.c', amount: 3262 },
+        { key: 'kwijtschelding_assets', status: 'not_checked', law: uri.id, article: '12' },
+      ],
       steps: [
         { key: 'cost_of_living_percentage', law: hhnk.id, article: '2.1', amount: 100 },
         { key: 'payable_per_year', law: uri.id, article: '11.b', amount: 139257 },
@@ -58,10 +69,47 @@ describe('VerifierResultView', () => {
     await i18n.changeLanguage('en');
   });
 
-  it('shows the outcome, the calculation and what is not counted', () => {
+  it('shows the verdict and which criteria are checked and met', () => {
     render(<VerifierResultView result={bijstand} />);
-    expect(screen.getByText('Social assistance (bijstand)')).toBeInTheDocument();
-    expect(screen.getByText(/You may be entitled to a supplement/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'You may be entitled to social assistance' })).toBeInTheDocument();
+    expect(screen.getByText('Indicative supplement: €213.90 per month')).toBeInTheDocument();
+    expect(screen.getByText(/You meet the 2 conditions we checked\. .* still assesses the 2 conditions we could not check/)).toBeInTheDocument();
+
+    const checked = within(screen.getByRole('heading', { name: 'What we checked' }).closest('section')!);
+    expect(checked.getByText('Income below the social assistance norm')).toBeInTheDocument();
+    expect(checked.getAllByText('Met')).toHaveLength(2);
+    // where you live, from the postcode on the address card
+    expect(checked.getByText('Living in this municipality')).toBeInTheDocument();
+    expect(checked.getByText(/Your postcode according to your address details: 6525 EC/)).toBeInTheDocument();
+    expect(checked.getByText(/Your income is €800.00 per month; the norm for your situation is €1,013.90/)).toBeInTheDocument();
+
+    const unchecked = within(screen.getByRole('heading', { name: 'What we did not check' }).closest('section')!);
+    expect(unchecked.getByText('Assets below the asset limit')).toBeInTheDocument();
+    expect(unchecked.getAllByText('Not checked')).toHaveLength(2);
+    // the household is declared, not checked
+    expect(unchecked.getByText(/You entered: no partner, 1 housemate/)).toBeInTheDocument();
+    expect(unchecked.getByText('art. 34 Participatiewet').closest('a')).toHaveAttribute('href', 'https://wetten.overheid.nl/BWBR0015703/2026-07-01#Artikel34');
+
+    // the municipality can make exceptions
+    expect(screen.getByText(/very urgent reasons \(art. 16\)/)).toBeInTheDocument();
+  });
+
+  it('says clearly when someone is not entitled', () => {
+    const result: VerifierResult = {
+      ...bijstand,
+      evaluation: {
+        ...bijstand.evaluation,
+        result: { ...bijstand.evaluation.result, outcome: 'no_indication', criteria: [{ ...bijstand.evaluation.result.criteria[0], status: 'not_met' }] },
+      },
+    };
+    render(<VerifierResultView result={result} />);
+    expect(screen.getByRole('heading', { name: 'You are probably not entitled to social assistance' })).toBeInTheDocument();
+    expect(screen.getByText('Not met')).toBeInTheDocument();
+    expect(screen.queryByText(/Indicative supplement:/)).not.toBeInTheDocument();
+  });
+
+  it('shows the calculation and what is not counted', () => {
+    render(<VerifierResultView result={bijstand} />);
     expect(screen.getByText(/21 or older, below the state pension age/)).toBeInTheDocument();
     // a count, not an amount
     expect(screen.getByText('2')).toBeInTheDocument();
@@ -74,12 +122,17 @@ describe('VerifierResultView', () => {
 
   it('shows the expenses, percentages and sources of kwijtschelding', () => {
     render(<VerifierResultView result={kwijtschelding} />);
-    expect(screen.getByText('Remission of water board taxes (HHNK)')).toBeInTheDocument();
-    expect(screen.getByText(/You pay at most the amount below per year/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'You may be eligible for partial remission' })).toBeInTheDocument();
+    expect(screen.getByText('Partly met')).toBeInTheDocument();
+    // a cost that is taken into account is no condition
+    expect(screen.getByText('Counted')).toBeInTheDocument();
+    expect(screen.getByText(/Counted: €32.62 per month/)).toBeInTheDocument();
+    expect(screen.getByText(/You meet the condition we checked/)).toBeInTheDocument();
+    expect(screen.getByText('You pay at most €1,392.57 per year')).toBeInTheDocument();
     expect(screen.getByText('Housing costs')).toBeInTheDocument();
     expect(screen.getByText('€435.48')).toBeInTheDocument();
     expect(screen.getByText('100%')).toBeInTheDocument();
-    expect(screen.getByText('€1,392.57')).toBeInTheDocument();
+    expect(screen.getAllByText('€1,392.57')).not.toHaveLength(0);
     // a local regulation links to the regulation itself
     expect(screen.getByText(/art. 2.1 Kwijtscheldingsregeling/).closest('a')).toHaveAttribute('href', hhnk.url);
     expect(screen.getByText('Uitvoeringsregeling Invorderingswet 1990').closest('a')).toHaveAttribute('href', uri.url);

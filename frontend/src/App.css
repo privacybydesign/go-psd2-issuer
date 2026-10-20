@@ -441,41 +441,474 @@ select {
 	color: #6E6E6E;
 }
 
-/* demo verifier */
+/* demo verifier, styled as a page of a (fictitious) municipality */
+#container.gemeente {
+	--gemeente-primary: #1A4A7A;
+	--gemeente-primary-dark: #12355A;
+	--gemeente-line: #D5DDE5;
+	--gemeente-text: #1F2A36;
+	--gemeente-muted: #5B6773;
+	--positive: #00703C;
+	--positive-bg: #E6F4EC;
+	--negative: #B84E00;
+	--negative-bg: #FDF0E5;
+	--partial: #725A00;
+	--partial-bg: #FFF8D6;
+	--neutral: #4A5560;
+	--neutral-bg: #EEF1F4;
+	background: #FFFFFF;
+	color: var(--gemeente-text);
+	height: auto;
+	min-height: 100%;
+	/* grow with the content inside the flex form instead of stopping at the viewport */
+	flex-shrink: 0;
+}
+
+.gemeente-header {
+	display: block;
+	background: #FFFFFF;
+	color: var(--gemeente-text);
+	border-bottom: 1px solid var(--gemeente-line);
+}
+
+.gemeente-bar {
+	background: var(--gemeente-primary);
+	color: #FFFFFF;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 12px max(16px, calc((100% - 720px) / 2));
+}
+
+.gemeente-brand {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.gemeente-logo {
+	width: 32px;
+	height: 38px;
+	color: var(--gemeente-primary);
+	flex-shrink: 0;
+}
+
+.gemeente-name {
+	font-family: 'Alexandria', Verdana, Arial, sans-serif;
+	font-weight: bold;
+	font-size: 18px;
+}
+
+.gemeente-demo {
+	border: 1px solid rgba(255, 255, 255, 0.7);
+	border-radius: 4px;
+	padding: 0 8px;
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.gemeente-crumbs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	font-size: 14px;
+	color: var(--gemeente-muted);
+	padding: 8px max(16px, calc((100% - 720px) / 2));
+}
+
+.gemeente-crumbs [aria-current] {
+	color: var(--gemeente-text);
+}
+
+.gemeente-content {
+	max-width: 720px;
+	color: var(--gemeente-text);
+}
+
+.gemeente-content h1 {
+	font-size: 28px;
+	line-height: 34px;
+	padding: 8px 0 16px;
+	color: var(--gemeente-primary-dark);
+}
+
+.gemeente-content h2 {
+	font-family: 'Alexandria', Verdana, Arial, sans-serif;
+	font-size: 20px;
+	line-height: 26px;
+	margin: 0 0 4px;
+	color: var(--gemeente-primary-dark);
+}
+
+.gemeente-content h3 {
+	font-size: 16px;
+	margin: 16px 0 4px;
+}
+
+.gemeente-content a {
+	color: var(--gemeente-primary);
+}
+
+.gemeente .lead {
+	font-size: 18px;
+	line-height: 28px;
+}
+
+.gemeente .privacy-note {
+	color: var(--gemeente-muted);
+}
+
+.gemeente-colofon {
+	margin-top: 32px;
+	padding-top: 16px;
+	border-top: 1px solid var(--gemeente-line);
+	font-size: 13px;
+	color: var(--gemeente-muted);
+}
+
 .household {
 	border: none;
 	padding: 0;
-	margin: 0 0 1em;
+	margin: 0 0 1.5em;
 }
 
 .household legend {
+	font-family: 'Alexandria', Verdana, Arial, sans-serif;
 	font-weight: bold;
+	font-size: 18px;
 	margin-bottom: 0.5em;
+	color: var(--gemeente-primary-dark);
 }
 
 .household label.choice {
 	display: flex;
 	align-items: center;
-	gap: 0.5em;
-	margin: 0.25em 0;
+	gap: 12px;
+	margin: 8px 0;
+	cursor: pointer;
 }
 
 .household label.choice input {
+	width: 20px;
+	height: 20px;
+	margin: 0;
+	flex-shrink: 0;
+	accent-color: var(--gemeente-primary);
+}
+
+/* form fields of the municipality instead of the Yivi underlined inputs */
+.gemeente label:not(.choice):not(.select) {
+	margin: 20px 0 6px;
+	font-size: 16px;
+	color: var(--gemeente-text);
+}
+
+.gemeente input[type="number"] {
+	box-sizing: border-box;
+	width: 10rem;
+	height: 44px;
+	padding: 8px 12px;
+	border: 2px solid #8A949E;
+	border-radius: 4px;
+	background: #FFFFFF;
+	color: var(--gemeente-text);
+}
+
+.gemeente input[type="number"]:hover {
+	border-color: var(--gemeente-primary);
+}
+
+.gemeente input:focus-visible,
+.gemeente button:focus-visible,
+.gemeente summary:focus-visible {
+	outline: 3px solid #FFB612;
+	outline-offset: 2px;
+}
+
+.gemeente .household .privacy-note {
+	font-size: 14px;
+	margin: 6px 0 0;
+}
+
+.gemeente footer {
+	background: #FFFFFF;
+	border-top: 1px solid var(--gemeente-line);
+	box-shadow: none;
+}
+
+.gemeente footer .actions {
+	max-width: 720px;
+}
+
+.gemeente footer button {
+	background: var(--gemeente-primary);
+	border-radius: 4px;
 	width: auto;
+	min-width: 200px;
+	padding: 0 24px;
+}
+
+.gemeente footer button:hover:not([disabled]) {
+	background: var(--gemeente-primary-dark);
+}
+
+.gemeente footer button#back-button {
+	background: #FFFFFF;
+	color: var(--gemeente-primary);
+	border: 2px solid var(--gemeente-primary);
+}
+
+.gemeente .credential-card {
+	border-color: var(--gemeente-line);
+}
+
+.law-card.selected {
+	border: 2px solid var(--gemeente-primary);
+}
+
+.law-card.unselected {
+	opacity: 1;
+}
+
+.law-card label.select,
+.household label.choice {
+	font-weight: normal;
+}
+
+.law-card label.select h2 {
+	margin: 0;
+	font-size: 16px;
+}
+
+.credential-card input[type="radio"] {
+	width: 20px;
+	height: 20px;
+	margin: 0;
+	flex-shrink: 0;
+	accent-color: var(--gemeente-primary, #E12747);
+}
+
+.law-preview {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 16px;
+	margin-top: 12px;
+	padding-top: 12px;
+	border-top: 1px solid var(--gemeente-line);
+	font-size: 14px;
+}
+
+.law-preview h3 {
+	margin: 0 0 4px;
+	font-size: 14px;
+}
+
+.preview-list {
+	list-style: none;
+	padding: 0;
 	margin: 0;
 }
 
-.disclaimer {
-	font-size: 0.9em;
-	font-style: italic;
+.preview-list li {
+	padding-left: 22px;
+	position: relative;
+	margin: 2px 0;
 }
 
-.rule-card.outcome-indication {
-	border-left: 4px solid #2e7d32;
-}
-
-.rule-card .outcome {
+.preview-list li::before {
+	position: absolute;
+	left: 0;
 	font-weight: bold;
+}
+
+.preview-list.checked li::before {
+	content: '✓';
+	color: var(--positive);
+}
+
+.preview-list.not-checked li::before {
+	content: '?';
+	color: var(--gemeente-muted);
+}
+
+@media only screen and (max-width: 520px) {
+	.law-preview {
+		grid-template-columns: 1fr;
+	}
+}
+
+.requested {
+	font-size: 0.85em;
+	margin-top: 0.75em;
+}
+
+.requested ul, .sources {
+	padding-left: 1.2em;
+	margin: 0.25em 0;
+}
+
+/* result */
+.verdict {
+	border-radius: 8px;
+	border: 1px solid color-mix(in srgb, var(--tone) 35%, transparent);
+	background: var(--tone-bg);
+	padding: 16px 20px;
+	margin-bottom: 24px;
+}
+
+.verdict.tone-positive { --tone: var(--positive); --tone-bg: var(--positive-bg); }
+.verdict.tone-negative { --tone: var(--negative); --tone-bg: var(--negative-bg); }
+.verdict.tone-partial { --tone: var(--partial); --tone-bg: var(--partial-bg); }
+.verdict.tone-neutral { --tone: var(--neutral); --tone-bg: var(--neutral-bg); }
+
+.verdict-scheme {
+	margin: 0;
+	font-size: 14px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--tone);
+	font-weight: bold;
+}
+
+.gemeente-content .verdict-title {
+	font-size: 24px;
+	line-height: 30px;
+	margin: 4px 0 8px;
+	color: var(--tone);
+}
+
+.verdict p {
+	margin: 4px 0;
+}
+
+.verdict-figure {
+	font-size: 18px;
+	font-weight: bold;
+}
+
+.verdict-basis {
+	font-size: 14px;
+}
+
+.criteria-section {
+	margin-bottom: 24px;
+}
+
+.section-intro {
+	margin: 0 0 8px;
+	color: var(--gemeente-muted);
+	font-size: 14px;
+}
+
+.criteria {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	border: 1px solid var(--gemeente-line);
+	border-radius: 8px;
+}
+
+.criterion {
+	display: flex;
+	align-items: flex-start;
+	gap: 12px;
+	padding: 12px 16px;
+}
+
+.criterion + .criterion {
+	border-top: 1px solid var(--gemeente-line);
+}
+
+.status-icon {
+	flex-shrink: 0;
+	width: 28px;
+	height: 28px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: bold;
+	color: #FFFFFF;
+	background: var(--status);
+}
+
+.criterion.status-met { --status: var(--positive); }
+.criterion.status-not_met { --status: var(--negative); }
+.criterion.status-partial { --status: var(--partial); }
+.criterion.status-counted { --status: var(--gemeente-primary); }
+.criterion.status-not_checked { --status: #8A949E; }
+
+.criterion-body {
+	flex: 1;
+	min-width: 0;
+}
+
+.criterion-title {
+	font-weight: bold;
+}
+
+.criterion-detail {
+	font-size: 14px;
+	color: var(--gemeente-muted);
+}
+
+.status-label {
+	flex-shrink: 0;
+	font-size: 13px;
+	font-weight: bold;
+	color: var(--status);
+	white-space: nowrap;
+}
+
+@media only screen and (max-width: 520px) {
+	.criterion {
+		flex-wrap: wrap;
+	}
+
+	.status-label {
+		flex-basis: 100%;
+		padding-left: 40px;
+		margin-top: -8px;
+	}
+}
+
+.notes {
+	font-size: 0.9em;
+	padding-left: 1.2em;
+	margin: 0;
+}
+
+.info-box {
+	background: var(--neutral-bg);
+	border-radius: 8px;
+	padding: 16px 20px;
+	margin-bottom: 24px;
+}
+
+.info-box h2 {
+	font-size: 18px;
+}
+
+.info-box p {
+	margin: 0 0 12px;
+}
+
+.info-box p:last-child {
+	margin-bottom: 0;
+}
+
+.calculation {
+	border: 1px solid var(--gemeente-line);
+	border-radius: 8px;
+	padding: 12px 16px;
+	margin-bottom: 24px;
+}
+
+.calculation summary {
+	cursor: pointer;
+	font-weight: bold;
+	color: var(--gemeente-primary);
 }
 
 .reason {
@@ -484,33 +917,8 @@ select {
 	opacity: 0.8;
 }
 
-.notes {
-	font-size: 0.85em;
-	padding-left: 1.2em;
-}
-
-.law-card label.select h2 {
-	margin: 0;
-}
-
-.credential-card input[type="radio"] {
-	width: 20px;
-	height: 20px;
-	margin: 0;
-	flex-shrink: 0;
-	accent-color: #E12747;
-}
-
-.requested {
-	font-size: 0.85em;
-	margin-top: 0.5em;
-}
-
-.requested ul, .sources {
-	padding-left: 1.2em;
-	margin: 0.25em 0;
-}
-
-.rule-card.outcome-partial {
-	border-left: 4px solid #f9a825;
+.disclaimer {
+	font-size: 0.9em;
+	font-style: italic;
+	color: var(--gemeente-muted);
 }

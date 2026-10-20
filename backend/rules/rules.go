@@ -71,6 +71,9 @@ type Input struct {
 	// TaxAssessment is the amount of the tax assessment in euros, for
 	// kwijtschelding; 0 when not given.
 	TaxAssessment int
+	// Postcode is the postcode of the address of the applicant, for the
+	// laws that need it.
+	Postcode string
 }
 
 // Item is one line of an income or expenses calculation.
@@ -105,11 +108,46 @@ const (
 	OutcomeNotEvaluated = "not_evaluated"
 )
 
+// Statuses of a criterion.
+const (
+	CriterionMet     = "met"
+	CriterionNotMet  = "not_met"
+	CriterionPartial = "partial"
+	// CriterionCounted: a cost that is taken into account, as Amount.
+	CriterionCounted = "counted"
+	// CriterionNotChecked: the disclosed data cannot establish it; the
+	// municipality (or water board, or SVB) assesses it on application.
+	CriterionNotChecked = "not_checked"
+)
+
+// Criterion is a condition of a scheme and whether this check established
+// it, so the user sees what the outcome is based on and what it is not.
+type Criterion struct {
+	// Key names the condition; the frontend translates it.
+	Key     string `json:"key"`
+	Status  string `json:"status"`
+	Law     string `json:"law,omitempty"`
+	Article string `json:"article,omitempty"`
+	// Amount and Limit are what a checked criterion compares, in euro
+	// cents per month, e.g. the income and the norm.
+	Amount int64 `json:"amount,omitempty"`
+	Limit  int64 `json:"limit,omitempty"`
+	// Value is what a checked criterion that is no amount was based on,
+	// e.g. the postcode.
+	Value string `json:"value,omitempty"`
+}
+
+func notChecked(key, law, article string) Criterion {
+	return Criterion{Key: key, Status: CriterionNotChecked, Law: law, Article: article}
+}
+
 type Result struct {
 	// Rule is the scheme the result is about, e.g. "bijstand" or "aio".
 	Rule    string `json:"rule"`
 	Outcome string `json:"outcome"`
-	Steps   []Step `json:"steps,omitempty"`
+	// Criteria are the conditions of the scheme, checked or not.
+	Criteria []Criterion `json:"criteria"`
+	Steps    []Step      `json:"steps,omitempty"`
 	// Notes are keys of caveats that apply to this result.
 	Notes []string `json:"notes,omitempty"`
 }
@@ -136,11 +174,32 @@ type Law struct {
 	Attributes []string
 	// NeedsTaxAssessment: the user may give the amount of the assessment.
 	NeedsTaxAssessment bool
-	evaluate           func(Input) (Evaluation, error)
+	// NeedsPostcode: the verifier also asks for the postcode of the
+	// address, to check that the applicant lives in the municipality.
+	NeedsPostcode bool
+	evaluate      func(Input) (Evaluation, error)
 }
 
 func (l Law) Evaluate(input Input) (Evaluation, error) {
 	return l.evaluate(input)
+}
+
+// Criteria splits the keys of the criteria of the law for an applicant of
+// 21 or older into those it checks and those it does not, so the user sees
+// them before sharing anything.
+func (l Law) Criteria(date time.Time) (checked, unchecked []string, err error) {
+	evaluation, err := l.evaluate(Input{AgeGroup: AgeAdult, Facts: Facts{}, Date: date})
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, c := range evaluation.Result.Criteria {
+		if c.Status == CriterionNotChecked {
+			unchecked = append(unchecked, c.Key)
+		} else {
+			checked = append(checked, c.Key)
+		}
+	}
+	return checked, unchecked, nil
 }
 
 // Laws are the laws the verifier offers, in the order they are shown.

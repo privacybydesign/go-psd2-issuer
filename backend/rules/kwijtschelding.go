@@ -10,12 +10,13 @@ const (
 	uri         = "uitvoeringsregeling_invorderingswet_1990"
 	huurtoeslag = "wet_op_de_huurtoeslag"
 	verlaging   = "wet_verlaging_eigen_bijdrage_huurtoeslag"
+	zorgtoeslag = "wet_op_de_zorgtoeslag"
 	hhnk        = "kwijtscheldingsregeling_hhnk"
 )
 
 // KwijtscheldingVersion holds the amounts the Uitvoeringsregeling takes from
-// the Wet op de huurtoeslag (art. 15.1.b), for one calendar year, in euro
-// cents per month.
+// the Wet op de huurtoeslag (art. 15.1.b) and the Wet op de zorgtoeslag (art.
+// 15.1.c), for one calendar year, in euro cents per month.
 type KwijtscheldingVersion struct {
 	// ValidFrom is the version of the Uitvoeringsregeling and of the Wet op
 	// de huurtoeslag (YYYY-MM-DD).
@@ -28,6 +29,12 @@ type KwijtscheldingVersion struct {
 	// (art. 1).
 	BasishuurSingle int64
 	BasishuurMulti  int64
+	// Normpremie is the normpremie of art. 2 Wet op de zorgtoeslag at an
+	// income up to the drempelinkomen, as included in the bijstandsnorm
+	// (art. 15.1.c): a percentage of the drempelinkomen (art. 2.3), for a
+	// single person and for a couple.
+	NormpremieSingle int64
+	NormpremieCouple int64
 }
 
 // KwijtscheldingVersions are sorted by ValidFrom; the amounts change every
@@ -39,6 +46,10 @@ var KwijtscheldingVersions = []KwijtscheldingVersion{
 		// 252,49 - 1,82 + 12 - 48,15 and 252,49 - 3,63 + 12 - 48,15
 		BasishuurSingle: 21452,
 		BasishuurMulti:  21271,
+		// 1,912% and 4,289% of the drempelinkomen of € 29.736 (108% of
+		// twelve times the minimum wage of January), per month
+		NormpremieSingle: 4738,
+		NormpremieCouple: 10628,
 	},
 }
 
@@ -57,6 +68,7 @@ func (v KwijtscheldingVersion) sources() []Source {
 		{Id: uri, Name: "Uitvoeringsregeling Invorderingswet 1990", Version: v.ValidFrom, Url: "https://wetten.overheid.nl/BWBR0004766/" + v.ValidFrom},
 		{Id: huurtoeslag, Name: "Wet op de huurtoeslag", Version: v.ValidFrom, Url: "https://wetten.overheid.nl/BWBR0008659/" + v.ValidFrom},
 		{Id: verlaging, Name: "Wet verlaging eigen bijdrage huurtoeslag", Version: v.ValidFrom, Url: "https://wetten.overheid.nl/BWBR0049106/" + v.ValidFrom},
+		{Id: zorgtoeslag, Name: "Wet op de zorgtoeslag", Version: v.ValidFrom, Url: "https://wetten.overheid.nl/BWBR0018451/" + v.ValidFrom},
 	}
 }
 
@@ -73,11 +85,13 @@ const PaymentCapacityPercentage = 80
 
 // kwijtscheldingIncome is the income of art. 14: net income from work,
 // pensions and benefits (a), alimony (b) and other income (c), plus the
-// voorlopige teruggaaf (14.2). Not asked for, because they do not count:
-// kinderopvangtoeslag and kindgebonden budget (subsidy.family, 14.1.c.3° and
-// 7°), zorgtoeslag (subsidy.health, 14.1.c.8°) and the individuele
-// inkomenstoeslag (subsidy.socialother, 14.1.c.5°). Huurtoeslag
-// (subsidy.rent) is no income either, but lowers the housing costs (15.3).
+// voorlopige teruggaaf (14.2). Not income: kinderopvangtoeslag and
+// kindgebonden budget (subsidy.family, 14.1.c.3° and 7°), zorgtoeslag
+// (subsidy.health, 14.1.c.8°) and the individuele inkomenstoeslag
+// (subsidy.socialother, 14.1.c.5°, not asked for). The allowances do lower
+// the costs they are for: huurtoeslag (subsidy.rent) the housing costs
+// (15.3), zorgtoeslag the healthcare premium (15.1.c) and
+// kinderopvangtoeslag the costs of childcare (28.3).
 var kwijtscheldingIncome = []incomeRule{
 	{"income.salary", uri, "14.1.a"},
 	{"income.pensionstate", uri, "14.1.a"},
@@ -96,12 +110,20 @@ var kwijtscheldingIncome = []incomeRule{
 }
 
 // kwijtscheldingExpenses are the attributes for the expenses of art. 15 that
-// are not already asked for as income.
-var kwijtscheldingExpenses = []string{"housing.rent", "housing.mortgage", "subsidy.rent", "tax.vehicle"}
+// are not already asked for as income: housing (b), taxes (a) and the
+// healthcare premium (c).
+var kwijtscheldingExpenses = []string{"housing.rent", "housing.mortgage", "subsidy.rent", "tax.vehicle", "insurance.health", "subsidy.health"}
 
+// childcareExpenses are the attributes for the costs of childcare (art.
+// 28.3). subsidy.family holds the kinderopvangtoeslag together with the
+// kindgebonden budget.
+var childcareExpenses = []string{"essential.childcare", "subsidy.family"}
+
+// The council of the (fictitious) municipality of the demo has decided to
+// count the costs of childcare (art. 28.3); the national rules do not.
 var kwijtscheldingGemeenteLaw = Law{
 	Id:                 "kwijtschelding_gemeente",
-	Attributes:         append(attributesOf(kwijtscheldingIncome), kwijtscheldingExpenses...),
+	Attributes:         append(append(attributesOf(kwijtscheldingIncome), kwijtscheldingExpenses...), childcareExpenses...),
 	NeedsTaxAssessment: true,
 	evaluate: func(input Input) (Evaluation, error) {
 		return evaluateKwijtschelding("kwijtschelding_gemeente", input, false)
@@ -140,17 +162,32 @@ func evaluateKwijtschelding(law string, input Input, isHhnk bool) (Evaluation, e
 	countIncome(&evaluation, kwijtscheldingIncome, input.Facts)
 	facts, h := input.Facts, input.Household
 
-	notes := []string{"note_kwijtschelding_assets", "note_kwijtschelding_average", "note_health_premium", "note_children"}
+	notes := []string{"note_kwijtschelding_average"}
 	if h.Partner {
 		notes = append(notes, "note_partner_income")
 	}
-	if !isHhnk {
-		notes = append(notes, "note_kwijtschelding_municipal")
-	}
 	result := Result{Rule: law, Notes: notes}
+	// criteria returns the conditions with the status of the payment
+	// capacity test and the costs that are counted; assets and the costs
+	// the bank data does not show are not checked.
+	countsChildcare := !isHhnk
+	criteria := func(capacity, health, childcare Criterion) []Criterion {
+		capacity.Key, capacity.Law, capacity.Article = "payment_capacity", uri, "13.1"
+		health.Key, health.Law, health.Article = "health_premium", uri, "15.1.c"
+		childcare.Key, childcare.Law, childcare.Article = "childcare", uri, "28.3"
+		return []Criterion{
+			capacity,
+			health,
+			childcare,
+			notChecked("household", participatiewet, "3"),
+			notChecked("kwijtschelding_assets", uri, "12"),
+			notChecked("children_costs", uri, "15.1.g"),
+		}
+	}
+	unchecked := Criterion{Status: CriterionNotChecked}
 
 	if input.AgeGroup == AgeUnder21 {
-		result.Outcome, result.Notes = OutcomeNotEvaluated, []string{"note_under21"}
+		result.Outcome, result.Criteria, result.Notes = OutcomeNotEvaluated, criteria(unchecked, unchecked, unchecked), []string{"note_under21"}
 		evaluation.Result = result
 		return evaluation, nil
 	}
@@ -158,7 +195,7 @@ func evaluateKwijtschelding(law string, input Input, isHhnk bool) (Evaluation, e
 		// HHNK art. 2.2 sets the cost of living of pensioners by the
 		// Regeling kwijtschelding belastingen medeoverheden, which is not
 		// implemented
-		result.Outcome, result.Notes = OutcomeNotEvaluated, []string{"note_hhnk_pension"}
+		result.Outcome, result.Criteria, result.Notes = OutcomeNotEvaluated, criteria(unchecked, unchecked, unchecked), []string{"note_hhnk_pension"}
 		evaluation.Result = result
 		return evaluation, nil
 	}
@@ -206,6 +243,49 @@ func evaluateKwijtschelding(law string, input Input, isHhnk bool) (Evaluation, e
 			evaluation.Expenses = append(evaluation.Expenses, Item{Attribute: e.attribute, Amount: amount, Law: uri, Article: e.article})
 		}
 	}
+
+	// Healthcare premium (15.1.c): the premium minus the normpremie that is
+	// already included in the bijstandsnorm and minus the zorgtoeslag.
+	premium := paid(facts, "insurance.health")
+	normpremie := version.NormpremieSingle
+	if h.Partner {
+		normpremie = version.NormpremieCouple
+	}
+	healthAllowance := int64(max(facts["subsidy.health"], 0)) * 100
+	healthDeduction := max(premium-normpremie-healthAllowance, 0)
+	steps = append(steps,
+		step("health_premium", uri, "15.1.c", premium),
+		step("normpremie", zorgtoeslag, "2.3", normpremie),
+		step("health_allowance", uri, "15.1.c", healthAllowance),
+		step("health_deduction", uri, "15.1.c", healthDeduction),
+	)
+	if healthDeduction > 0 {
+		evaluation.Expenses = append(evaluation.Expenses, Item{Attribute: "insurance.health", Amount: healthDeduction, Law: uri, Article: "15.1.c"})
+	}
+	health := Criterion{Status: CriterionCounted, Amount: healthDeduction}
+
+	// Childcare (28.3), if the council has decided so: the costs minus the
+	// kinderopvangtoeslag. That is on one card with the kindgebonden
+	// budget, which is subtracted as well, so the costs counted may be too
+	// low.
+	childcare := unchecked
+	if countsChildcare {
+		costs := paid(facts, "essential.childcare")
+		childcareAllowance := int64(max(facts["subsidy.family"], 0)) * 100
+		childcareDeduction := max(costs-childcareAllowance, 0)
+		steps = append(steps,
+			step("childcare_costs", uri, "28.3", costs),
+			step("childcare_allowance", uri, "28.3", childcareAllowance),
+			step("childcare_deduction", uri, "28.3", childcareDeduction),
+		)
+		if childcareDeduction > 0 {
+			evaluation.Expenses = append(evaluation.Expenses, Item{Attribute: "essential.childcare", Amount: childcareDeduction, Law: uri, Article: "28.3"})
+		}
+		if costs > 0 && childcareAllowance > 0 {
+			result.Notes = append(result.Notes, "note_childcare_allowance")
+		}
+		childcare = Criterion{Status: CriterionCounted, Amount: childcareDeduction}
+	}
 	var expenses int64
 	for _, e := range evaluation.Expenses {
 		expenses += e.Amount
@@ -248,6 +328,13 @@ func evaluateKwijtschelding(law string, input Input, isHhnk bool) (Evaluation, e
 	default:
 		result.Outcome = OutcomePartial
 	}
+	capacityStatus := map[string]string{
+		OutcomeIndication:   CriterionMet,
+		OutcomePartial:      CriterionPartial,
+		OutcomeNoIndication: CriterionNotMet,
+	}[result.Outcome]
+	// the payment capacity per month, against the cost of living
+	result.Criteria = criteria(Criterion{Status: capacityStatus, Amount: capacity, Limit: costOfLiving}, health, childcare)
 	result.Steps = steps
 	evaluation.Result = result
 	return evaluation, nil

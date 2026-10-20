@@ -19,7 +19,8 @@ import (
 )
 
 // The demo verifier lets the user choose a law (package rules), asks for
-// exactly the attributes that law needs plus the date of birth, and
+// exactly the attributes that law needs plus the date of birth (and the
+// postcode, for the laws that check where the applicant lives), and
 // evaluates the law on them. The IRMA server session is started and its
 // result fetched by the backend, so the browser never holds the requestor
 // token and cannot alter the result.
@@ -35,6 +36,9 @@ const ErrorInvalidProof = "error:invalid-proof"
 // DefaultDateOfBirthAttribute is the attribute the age is derived from.
 const DefaultDateOfBirthAttribute = "irma-demo.gemeente.personalData.dateofbirth"
 
+// DefaultPostcodeAttribute is the attribute the municipality is checked on.
+const DefaultPostcodeAttribute = "irma-demo.gemeente.address.zipcode"
+
 // maxTaxAssessment bounds the tax assessment a user can enter, in euros.
 const maxTaxAssessment = 100_000
 
@@ -47,6 +51,10 @@ type DemoVerifierConfig struct {
 	// e.g. pbdf.gemeente.personalData.dateofbirth. Defaults to
 	// DefaultDateOfBirthAttribute.
 	DateOfBirthAttribute string `json:"date_of_birth_attribute,omitempty"`
+	// PostcodeAttribute is the Yivi attribute with the postcode of the
+	// address, e.g. pbdf.gemeente.address.zipcode. Defaults to
+	// DefaultPostcodeAttribute.
+	PostcodeAttribute string `json:"postcode_attribute,omitempty"`
 }
 
 // RequestSigner signs session requests as the requestor of this service.
@@ -71,14 +79,20 @@ type Verifier struct {
 	// attributes maps the keys of rules.Facts to the Yivi attribute ids.
 	attributes  map[string]irma.AttributeTypeIdentifier
 	dateOfBirth irma.AttributeTypeIdentifier
+	postcode    irma.AttributeTypeIdentifier
 }
 
-func NewVerifier(irmaServerURL string, signer RequestSigner, credentialIds map[string]string, dateOfBirthAttribute string) (*Verifier, error) {
+func NewVerifier(irmaServerURL string, signer RequestSigner, credentialIds map[string]string, dateOfBirthAttribute, postcodeAttribute string) (*Verifier, error) {
 	if dateOfBirthAttribute == "" {
 		dateOfBirthAttribute = DefaultDateOfBirthAttribute
 	}
-	if strings.Count(dateOfBirthAttribute, ".") != 3 {
-		return nil, fmt.Errorf("date of birth attribute %q is not of the form scheme.issuer.credential.attribute", dateOfBirthAttribute)
+	if postcodeAttribute == "" {
+		postcodeAttribute = DefaultPostcodeAttribute
+	}
+	for _, attribute := range []string{dateOfBirthAttribute, postcodeAttribute} {
+		if strings.Count(attribute, ".") != 3 {
+			return nil, fmt.Errorf("attribute %q is not of the form scheme.issuer.credential.attribute", attribute)
+		}
 	}
 	v := &Verifier{
 		irmaServerURL: strings.TrimRight(irmaServerURL, "/"),
@@ -86,6 +100,7 @@ func NewVerifier(irmaServerURL string, signer RequestSigner, credentialIds map[s
 		client:        &http.Client{Timeout: 10 * time.Second},
 		attributes:    map[string]irma.AttributeTypeIdentifier{},
 		dateOfBirth:   irma.NewAttributeTypeIdentifier(dateOfBirthAttribute),
+		postcode:      irma.NewAttributeTypeIdentifier(postcodeAttribute),
 	}
 	for _, law := range rules.Laws {
 		for _, fact := range law.Attributes {
@@ -101,8 +116,9 @@ func NewVerifier(irmaServerURL string, signer RequestSigner, credentialIds map[s
 }
 
 // request builds the disclosure request for a law: the attributes it needs,
-// grouped per credential, and the date of birth. All of them are required,
-// because the law cannot be applied without any one of them.
+// grouped per credential, the date of birth and, if the law needs it, the
+// postcode. All of them are required, because the law cannot be applied
+// without any one of them.
 func (v *Verifier) request(law rules.Law) *irma.DisclosureRequest {
 	request := irma.NewDisclosureRequest()
 	var order []string
@@ -118,6 +134,9 @@ func (v *Verifier) request(law rules.Law) *irma.DisclosureRequest {
 		request.Disclose = append(request.Disclose, irma.AttributeDisCon{byCredential[key]})
 	}
 	request.Disclose = append(request.Disclose, irma.AttributeDisCon{{{Type: v.dateOfBirth}}})
+	if law.NeedsPostcode {
+		request.Disclose = append(request.Disclose, irma.AttributeDisCon{{{Type: v.postcode}}})
+	}
 	return request
 }
 
@@ -198,9 +217,18 @@ func parseDate(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unknown date format %q", value)
 }
 
-// readDisclosure converts the disclosed attributes to the facts of a law and
-// the date of birth. Every attribute the law needs must be present.
-func (v *Verifier) readDisclosure(disclosed [][]*irma.DisclosedAttribute, law rules.Law) (rules.Facts, time.Time, error) {
+// disclosure is what readDisclosure reads from the disclosed attributes.
+type disclosure struct {
+	facts       rules.Facts
+	dateOfBirth time.Time
+	// postcode is empty unless the law needs it
+	postcode string
+}
+
+// readDisclosure converts the disclosed attributes to the facts of a law,
+// the date of birth and the postcode. Every attribute the law needs must be
+// present.
+func (v *Verifier) readDisclosure(disclosed [][]*irma.DisclosedAttribute, law rules.Law) (disclosure, error) {
 	present := map[irma.AttributeTypeIdentifier]string{}
 	for _, con := range disclosed {
 		for _, attribute := range con {
@@ -214,23 +242,31 @@ func (v *Verifier) readDisclosure(disclosed [][]*irma.DisclosedAttribute, law ru
 		id := v.attributes[fact]
 		raw, ok := present[id]
 		if !ok {
-			return nil, time.Time{}, fmt.Errorf("attribute %s was not disclosed", id)
+			return disclosure{}, fmt.Errorf("attribute %s was not disclosed", id)
 		}
 		value, err := strconv.Atoi(raw)
 		if err != nil {
-			return nil, time.Time{}, fmt.Errorf("attribute %s is not a number", id)
+			return disclosure{}, fmt.Errorf("attribute %s is not a number", id)
 		}
 		facts[fact] = value
 	}
 	raw, ok := present[v.dateOfBirth]
 	if !ok {
-		return nil, time.Time{}, fmt.Errorf("attribute %s was not disclosed", v.dateOfBirth)
+		return disclosure{}, fmt.Errorf("attribute %s was not disclosed", v.dateOfBirth)
 	}
 	dateOfBirth, err := parseDate(raw)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("attribute %s: %w", v.dateOfBirth, err)
+		return disclosure{}, fmt.Errorf("attribute %s: %w", v.dateOfBirth, err)
 	}
-	return facts, dateOfBirth, nil
+	result := disclosure{facts: facts, dateOfBirth: dateOfBirth}
+	if law.NeedsPostcode {
+		postcode := strings.TrimSpace(present[v.postcode])
+		if postcode == "" {
+			return disclosure{}, fmt.Errorf("attribute %s was not disclosed", v.postcode)
+		}
+		result.postcode = postcode
+	}
+	return result, nil
 }
 
 // -----------------------------------------------------------------------------------
@@ -238,9 +274,15 @@ func (v *Verifier) readDisclosure(disclosed [][]*irma.DisclosedAttribute, law ru
 type VerifierLaw struct {
 	Id string `json:"id"`
 	// Attributes are the facts the law asks for, keyed as in the
-	// definitions ("income.salary"); the date of birth comes on top.
+	// definitions ("income.salary"); the date of birth, and the postcode if
+	// NeedsPostcode, come on top.
 	Attributes         []string `json:"attributes"`
 	NeedsTaxAssessment bool     `json:"needs_tax_assessment"`
+	NeedsPostcode      bool     `json:"needs_postcode"`
+	// Checked and NotChecked are the keys of the criteria the check does
+	// and does not establish.
+	Checked    []string `json:"checked"`
+	NotChecked []string `json:"not_checked"`
 }
 
 // handleVerifierLaws lists the laws, so the user sees what each one asks
@@ -252,7 +294,12 @@ func handleVerifierLaws(state *ServerState, w http.ResponseWriter, r *http.Reque
 	}
 	laws := make([]VerifierLaw, len(rules.Laws))
 	for i, law := range rules.Laws {
-		laws[i] = VerifierLaw{Id: law.Id, Attributes: law.Attributes, NeedsTaxAssessment: law.NeedsTaxAssessment}
+		checked, notChecked, err := law.Criteria(time.Now())
+		if err != nil {
+			respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to list criteria", err, "endpoint", r.URL.Path, "law", law.Id)
+			return
+		}
+		laws[i] = VerifierLaw{Id: law.Id, Attributes: law.Attributes, NeedsTaxAssessment: law.NeedsTaxAssessment, NeedsPostcode: law.NeedsPostcode, Checked: checked, NotChecked: notChecked}
 	}
 	writeJson(w, http.StatusOK, laws)
 }
@@ -384,14 +431,14 @@ func handleVerifierResult(state *ServerState, w http.ResponseWriter, r *http.Req
 		respondWithErr(w, http.StatusBadRequest, ErrorInvalidProof, "disclosure not valid", nil, "endpoint", endpoint, "type", result.Type, "proof_status", result.ProofStatus)
 		return
 	}
-	facts, dateOfBirth, err := state.verifier.readDisclosure(result.Disclosed, law)
+	disclosed, err := state.verifier.readDisclosure(result.Disclosed, law)
 	if err != nil {
 		respondWithErr(w, http.StatusBadRequest, ErrorInvalidProof, "unexpected disclosure", err, "endpoint", endpoint)
 		return
 	}
 
 	now := time.Now()
-	ageGroup, err := rules.AgeGroupAt(dateOfBirth, now)
+	ageGroup, err := rules.AgeGroupAt(disclosed.dateOfBirth, now)
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to determine age group", err, "endpoint", endpoint)
 		return
@@ -399,9 +446,10 @@ func handleVerifierResult(state *ServerState, w http.ResponseWriter, r *http.Req
 	evaluation, err := law.Evaluate(rules.Input{
 		Household:     verification.Household,
 		AgeGroup:      ageGroup,
-		Facts:         facts,
+		Facts:         disclosed.facts,
 		Date:          now,
 		TaxAssessment: verification.TaxAssessment,
+		Postcode:      disclosed.postcode,
 	})
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to evaluate law", err, "endpoint", endpoint)

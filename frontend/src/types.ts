@@ -70,6 +70,11 @@ export interface VerifierLaw {
   // comes on top
   attributes: string[];
   needs_tax_assessment: boolean;
+  // the postcode is asked for on top of the attributes
+  needs_postcode: boolean;
+  // keys of the criteria the check does and does not establish
+  checked: string[];
+  not_checked: string[];
 }
 
 export interface VerifierStartResponse {
@@ -103,11 +108,27 @@ export interface RuleStep {
   amount: number;
 }
 
+export type CriterionStatus = 'met' | 'not_met' | 'partial' | 'counted' | 'not_checked';
+
+export interface Criterion {
+  key: string;
+  status: CriterionStatus;
+  law?: string;
+  article?: string;
+  // what a checked criterion compares, in euro cents per month
+  amount?: number;
+  limit?: number;
+  // what a checked criterion that is no amount was based on, e.g. the
+  // postcode
+  value?: string;
+}
+
 export type Outcome = 'indication' | 'partial' | 'no_indication' | 'not_evaluated';
 
 export interface RuleResult {
   rule: string;
   outcome: Outcome;
+  criteria: Criterion[];
   steps?: RuleStep[];
   notes?: string[];
 }

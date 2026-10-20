@@ -43,6 +43,7 @@
     "trusted_proxies": [],
     "demo_verifier": {
         "enabled": false,
-        "date_of_birth_attribute": "irma-demo.gemeente.personalData.dateofbirth"
+        "date_of_birth_attribute": "irma-demo.gemeente.personalData.dateofbirth",
+        "postcode_attribute": "irma-demo.gemeente.address.zipcode"
     }
 }

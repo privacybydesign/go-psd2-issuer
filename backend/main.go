@@ -161,7 +161,7 @@ func createServerState(config *Config) (*ServerState, error) {
 		if irmaServerUrl == "" {
 			irmaServerUrl = config.IrmaServerUrl
 		}
-		verifier, err = NewVerifier(irmaServerUrl, jwtCreator, credentialIds, config.DemoVerifier.DateOfBirthAttribute)
+		verifier, err = NewVerifier(irmaServerUrl, jwtCreator, credentialIds, config.DemoVerifier.DateOfBirthAttribute, config.DemoVerifier.PostcodeAttribute)
 		if err != nil {
 			return nil, fmt.Errorf("failed to instantiate demo verifier: %w", err)
 		}
