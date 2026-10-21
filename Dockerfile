@@ -6,7 +6,7 @@ RUN npm run build
 
 # -----------------------------------------------------
 
-FROM golang:1.26.9 AS backend-build
+FROM golang:1.26.10 AS backend-build
 WORKDIR /app/backend
 COPY backend .
 RUN go mod download
