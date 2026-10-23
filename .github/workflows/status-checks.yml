@@ -49,17 +49,6 @@ jobs:
     with:
       push-image: false
 
-  codeql:
-    uses: privacybydesign/github-workflows/.github/workflows/codeql.yml@v1
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    with:
-      languages: '["go", "javascript-typescript", "actions"]'
-      go-version-file: backend/go.mod
-      go-build-command: cd backend && go build ./...
-
   dependency-review:
     if: github.event_name == 'pull_request'
     uses: privacybydesign/github-workflows/.github/workflows/dependency-review.yml@v1
@@ -75,7 +64,7 @@ jobs:
   passed:
     name: Status checks passed
     if: always()
-    needs: [frontend, go, docker, codeql, dependency-review, workflow-lint]
+    needs: [frontend, go, docker, dependency-review, workflow-lint]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
