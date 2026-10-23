@@ -1,4 +1,4 @@
-FROM node:23 AS frontend-build
+FROM node:25 AS frontend-build
 WORKDIR /app/frontend
 COPY frontend .
 RUN npm ci
@@ -6,7 +6,7 @@ RUN npm run build
 
 # -----------------------------------------------------
 
-FROM golang:1.26.10 AS backend-build
+FROM golang:1.27.2 AS backend-build
 WORKDIR /app/backend
 COPY backend .
 RUN go mod download
