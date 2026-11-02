@@ -15,10 +15,11 @@ import (
 
 // Session statuses, in the order a successful flow goes through them.
 const (
-	// StatusAwaitingConsent: the user was sent to the enablenow AppScreen.
+	// StatusAwaitingConsent: the user is connecting banks through the
+	// enablenow AppScreen, one consent per bank, until they continue.
 	StatusAwaitingConsent = "awaiting_consent"
-	// StatusAwaitingTransactions: a consent was given, enablenow is fetching
-	// the transactions from the bank.
+	// StatusAwaitingTransactions: the user is done connecting banks,
+	// enablenow is fetching the transactions from the banks.
 	StatusAwaitingTransactions = "awaiting_transactions"
 	// StatusCategorizing: a categorization job is running.
 	StatusCategorizing = "categorizing"
@@ -31,6 +32,30 @@ const (
 	StatusVerifying = "verifying"
 )
 
+// Statuses of a single consent (bank) within a session.
+const (
+	// ConsentPending: enablenow is still fetching the transactions.
+	ConsentPending = "pending"
+	// ConsentReady: the transactions are fetched.
+	ConsentReady = "ready"
+	// ConsentFailed: the bank connection failed; the flow continues with the
+	// other banks.
+	ConsentFailed = "failed"
+	// ConsentReplaced: the bank was connected again, and enablenow revoked
+	// this earlier consent.
+	ConsentReplaced = "replaced"
+)
+
+// MaxBanks bounds the number of banks one session can connect.
+const MaxBanks = 5
+
+// SessionConsent is one bank connected in a session.
+type SessionConsent struct {
+	Id          string `json:"id"`
+	ProviderKey string `json:"provider_key,omitempty"`
+	Status      string `json:"status"`
+}
+
 // SessionTTL bounds how long a session, including the computed credential
 // values, is kept.
 const SessionTTL = 30 * time.Minute
@@ -41,14 +66,17 @@ type Session struct {
 	Id string `json:"id"`
 	// State is the anti-CSRF value passed through the AppScreen and checked
 	// when the consent id comes back.
-	State       string                   `json:"state"`
-	Status      string                   `json:"status"`
-	Error       string                   `json:"error,omitempty"`
-	ConsentId   string                   `json:"consent_id,omitempty"`
-	ProviderKey string                   `json:"provider_key,omitempty"`
-	JobId       string                   `json:"job_id,omitempty"`
-	Credentials []credentials.Credential `json:"credentials,omitempty"`
-	CreatedAt   time.Time                `json:"created_at"`
+	State  string `json:"state"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+	// UserId is the enablenow user all consents of the session are linked
+	// to, so the banks can be categorized together.
+	UserId         string                   `json:"user_id,omitempty"`
+	ExternalUserId string                   `json:"external_user_id,omitempty"`
+	Consents       []SessionConsent         `json:"consents,omitempty"`
+	JobId          string                   `json:"job_id,omitempty"`
+	Credentials    []credentials.Credential `json:"credentials,omitempty"`
+	CreatedAt      time.Time                `json:"created_at"`
 	// StepStartedAt is when the current status was entered, used to time
 	// out flows that never complete.
 	StepStartedAt time.Time `json:"step_started_at"`
@@ -79,6 +107,26 @@ func (s *Session) setStatus(status string, now time.Time) {
 func (s *Session) fail(errorCode string, now time.Time) {
 	s.setStatus(StatusFailed, now)
 	s.Error = errorCode
+}
+
+func (s *Session) hasConsent(id string) bool {
+	for _, c := range s.Consents {
+		if c.Id == id {
+			return true
+		}
+	}
+	return false
+}
+
+// consentsWithStatus returns the session's consents with the given status.
+func (s *Session) consentsWithStatus(status string) []SessionConsent {
+	var consents []SessionConsent
+	for _, c := range s.Consents {
+		if c.Status == status {
+			consents = append(consents, c)
+		}
+	}
+	return consents
 }
 
 // SessionStorage must be safe for concurrent use.

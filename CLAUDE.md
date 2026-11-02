@@ -45,5 +45,14 @@ monthly averages), plus bankaccount. Modeled on go-sms-issuer.
   `redirect_uri` (`/callback?state=...`). The AppScreen cannot be iframed.
   The redirect goes to `/callback` (no language prefix); the frontend
   remembers the language in sessionStorage.
-- The consent is deleted at enablenow as soon as credentials are computed
-  (`flow.cleanup`), unless `categorization.keep_consent` is set.
+- Every session creates an enablenow user (`POST /Users`) and passes
+  `user_id` to the AppScreen, so all banks the user connects hang off it.
+  One bank is categorized per consent (so an auto-started job is reused),
+  several banks with one job per user plus `internal_ibans`. Transactions
+  and accounts are still fetched per consent.
+- The enablenow user (with all consents and bank data) is deleted as soon as
+  credentials are computed (`flow.cleanup`), unless
+  `categorization.keep_consent` is set.
+- A failed bank does not fail the session; only when no bank is left.
+  Re-connecting the same bank makes enablenow revoke the older consent
+  (`INVALIDATED`); that consent becomes `replaced`, not `failed`.

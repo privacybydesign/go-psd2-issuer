@@ -922,3 +922,42 @@ select {
 	font-style: italic;
 	color: var(--gemeente-muted);
 }
+
+.bank-list {
+	list-style: none;
+	padding: 0;
+	margin: 1em 0;
+}
+
+.bank-list li {
+	display: flex;
+	justify-content: space-between;
+	gap: 1em;
+	padding: 0.6em 0.8em;
+	border: 1px solid #d6d6d6;
+	border-radius: 4px;
+	margin-bottom: 0.5em;
+}
+
+.bank-list .bank-name {
+	font-weight: bold;
+	overflow-wrap: anywhere;
+}
+
+.bank-list .bank-failed .bank-status {
+	color: #c0392b;
+}
+
+button.secondary {
+	background: #FFFFFF;
+	color: #484747;
+	border: 1px solid #484747;
+	border-radius: 4px;
+	padding: 0.6em 1em;
+	cursor: pointer;
+}
+
+button.secondary[disabled] {
+	opacity: 0.5;
+	cursor: default;
+}

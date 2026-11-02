@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import IndexPage from './pages/Index';
 import CallbackPage from './pages/Callback';
+import BanksPage from './pages/Banks';
 import ProgressPage from './pages/Progress';
 import ReviewPage from './pages/Review';
 import ErrorPage from './pages/Error';
@@ -30,6 +31,7 @@ function LanguageRouter() {
   return (
     <Routes>
       <Route path="/" element={<IndexPage />} />
+      <Route path="/banks" element={<BanksPage />} />
       <Route path="/progress" element={<ProgressPage />} />
       <Route path="/review" element={<ReviewPage />} />
       <Route path="/error" element={<ErrorPage />} />

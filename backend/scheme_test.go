@@ -27,7 +27,7 @@ type issueSpecification struct {
 func TestSchemeMatchesCredentials(t *testing.T) {
 	now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	accounts := []enablenow.Account{{Iban: "NL91ABNA0417164300", AccountHolder: "J. Jansen"}}
-	computed := credentials.Compute(accounts, nil, "bank", credentials.Options{Now: now})
+	computed := credentials.Compute([]credentials.Bank{{ProviderKey: "bank", Accounts: accounts}}, credentials.Options{Now: now})
 
 	for _, cred := range computed {
 		path := filepath.Join("..", "scheme", "irma-demo", "enablenow", "Issues", cred.Key, "description.xml")

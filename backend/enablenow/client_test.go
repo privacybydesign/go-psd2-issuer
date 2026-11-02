@@ -126,7 +126,7 @@ func TestCreateAndGetJob(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, JobCompleted, job.Status)
 
-	jobs, err := client.ListCategorizationJobs(t.Context(), "c1")
+	jobs, err := client.ListCategorizationJobs(t.Context(), JobFilter{ConsentId: "c1"})
 	require.NoError(t, err)
 	require.Len(t, jobs, 1)
 }
@@ -141,7 +141,7 @@ func TestApiErrors(t *testing.T) {
 	require.True(t, IsNotFound(err))
 
 	// listing jobs for a consent without jobs is not an error
-	jobs, err := client.ListCategorizationJobs(t.Context(), "c1")
+	jobs, err := client.ListCategorizationJobs(t.Context(), JobFilter{ConsentId: "c1"})
 	require.NoError(t, err)
 	require.Empty(t, jobs)
 }
@@ -202,4 +202,77 @@ func TestCreateJobAcceptsJobObject(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "j2", job.Id)
 	require.Equal(t, JobInProgress, job.Status)
+}
+
+func TestConsentURLWithUser(t *testing.T) {
+	client, err := NewHttpClient(Config{ClientId: "abc", ClientSecret: "s"})
+	require.NoError(t, err)
+	u, err := url.Parse(client.ConsentURL("https://issuer.example/callback?state=xyz", url.Values{"user_id": {"u1"}}))
+	require.NoError(t, err)
+	require.Equal(t, "u1", u.Query().Get("user_id"))
+	require.Equal(t, "https://issuer.example/callback?state=xyz", u.Query().Get("redirect_uri"))
+}
+
+func TestCreateAndDeleteUser(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/Users":
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			require.Equal(t, map[string]any{"externalUserId": "ext-1"}, body)
+			_, _ = w.Write([]byte(`{"data":{"id":"u1","externalUserId":"ext-1"}}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/Users":
+			require.Equal(t, "u1", r.URL.Query().Get("UserId"))
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	})
+	user, err := client.CreateUser(t.Context(), "ext-1")
+	require.NoError(t, err)
+	require.Equal(t, User{Id: "u1", ExternalUserId: "ext-1"}, *user)
+	require.NoError(t, client.DeleteUser(t.Context(), "u1"))
+}
+
+func TestCreateUserRequiresId(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"externalUserId":"ext-1"}`))
+	})
+	_, err := client.CreateUser(t.Context(), "ext-1")
+	require.Error(t, err)
+}
+
+func TestCreateUserJobWithInternalIbans(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v2/categorization-jobs", r.URL.Path)
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Equal(t, map[string]any{
+			"engine":      "e1",
+			"profile":     "retail",
+			"countryCode": "nl",
+			"userId":      "u1",
+			"metaData":    map[string]any{"internal_ibans": []any{"NL02RABO0123456789", "NL91ABNA0417164300"}},
+		}, body)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"data":"j1"}`))
+	})
+	job, err := client.CreateCategorizationJob(t.Context(), JobRequest{
+		Engine: "e1", Profile: "retail", CountryCode: "nl", UserId: "u1",
+		MetaData: &JobMetaData{InternalIbans: []string{"NL02RABO0123456789", "NL91ABNA0417164300"}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "j1", job.Id)
+	require.Equal(t, "u1", job.UserId)
+}
+
+func TestListJobsByExternalUser(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v2/categorization-jobs", r.URL.Path)
+		require.Equal(t, url.Values{"externalUserId": {"ext-1"}}, r.URL.Query())
+		_, _ = w.Write([]byte(`{"data":[{"id":"j1","status":"COMPLETED","engine":"e1","profile":"retail"}]}`))
+	})
+	jobs, err := client.ListCategorizationJobs(t.Context(), JobFilter{ExternalUserId: "ext-1"})
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
 }

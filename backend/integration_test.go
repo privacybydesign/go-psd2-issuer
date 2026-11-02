@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -97,13 +98,60 @@ func (e *testEnv) start(t *testing.T) (consentId, state string) {
 	t.Helper()
 	resp, body := e.do(t, http.MethodPost, "/api/session/start", map[string]string{})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	return redirectParams(t, body)
+}
 
+// addBank asks for the AppScreen URL of another bank and returns the consent
+// id and state the (fake) AppScreen redirects back with.
+func (e *testEnv) addBank(t *testing.T) (consentId, state string) {
+	t.Helper()
+	resp, body := e.do(t, http.MethodPost, "/api/session/add-bank", map[string]string{})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	return redirectParams(t, body)
+}
+
+func redirectParams(t *testing.T, body []byte) (consentId, state string) {
+	t.Helper()
 	var start StartResponse
 	require.NoError(t, json.Unmarshal(body, &start))
 	redirect, err := url.Parse(start.Url)
 	require.NoError(t, err)
 	require.Equal(t, "http://issuer.example/callback", redirect.Scheme+"://"+redirect.Host+redirect.Path)
 	return redirect.Query().Get("consent_id"), redirect.Query().Get("state")
+}
+
+func (e *testEnv) consent(t *testing.T, consentId, state string) StatusResponse {
+	t.Helper()
+	resp, body := e.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: consentId, State: state})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var status StatusResponse
+	require.NoError(t, json.Unmarshal(body, &status))
+	return status
+}
+
+func (e *testEnv) finish(t *testing.T) StatusResponse {
+	t.Helper()
+	resp, body := e.do(t, http.MethodPost, "/api/session/finish", map[string]string{})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var status StatusResponse
+	require.NoError(t, json.Unmarshal(body, &status))
+	return status
+}
+
+// session returns the stored session of the test client's cookie.
+func (e *testEnv) session(t *testing.T) *Session {
+	t.Helper()
+	u, err := url.Parse(e.server.URL)
+	require.NoError(t, err)
+	for _, cookie := range e.client.Jar.Cookies(u) {
+		if cookie.Name == sessionCookieName {
+			session, err := e.storage.Get(cookie.Value)
+			require.NoError(t, err)
+			return session
+		}
+	}
+	t.Fatal("no session cookie")
+	return nil
 }
 
 func (e *testEnv) status(t *testing.T) StatusResponse {
@@ -122,22 +170,32 @@ func TestFullIssuanceFlow(t *testing.T) {
 	require.NotEmpty(t, state)
 
 	require.Equal(t, StatusAwaitingConsent, env.status(t).Status)
+	userId := env.session(t).UserId
+	require.NotEmpty(t, userId)
 
-	resp, body := env.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: consentId, State: state})
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	status := env.consent(t, consentId, state)
+	// the user can connect another bank or continue
+	require.Equal(t, StatusAwaitingConsent, status.Status)
+	require.Equal(t, []BankStatus{{Provider: "fake-bank", Status: ConsentPending}}, status.Banks)
 
 	// posting the same consent again (page reload) is fine
-	resp, _ = env.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: consentId, State: state})
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	status = env.consent(t, consentId, state)
+	require.Len(t, status.Banks, 1)
 
-	status := env.status(t)
+	require.Equal(t, StatusAwaitingTransactions, env.finish(t).Status)
+	// finishing twice (double click) is fine
+	require.Equal(t, StatusAwaitingTransactions, env.finish(t).Status)
+
+	status = env.status(t)
 	require.Equal(t, StatusReady, status.Status, status.Error)
 	require.Len(t, status.Credentials, len(credentials.AllKeys)+1) // two bank accounts
+	require.Equal(t, []BankStatus{{Provider: "fake-bank", Status: ConsentReady}}, status.Banks)
 
-	// the consent is deleted at enablenow once the credentials are computed
-	require.Equal(t, []string{consentId}, env.fake.Deleted)
+	// the enablenow user and its bank data are deleted once the credentials
+	// are computed
+	require.Equal(t, []string{userId}, env.fake.DeletedUsers)
 
-	resp, body = env.do(t, http.MethodPost, "/api/session/issue", IssuePayload{Credentials: []string{"income", "bankaccount", "unknown"}})
+	resp, body := env.do(t, http.MethodPost, "/api/session/issue", IssuePayload{Credentials: []string{"income", "bankaccount", "unknown"}})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	var issue IssueResponse
 	require.NoError(t, json.Unmarshal(body, &issue))
@@ -199,14 +257,134 @@ func TestConsentWithWrongStateIsRejected(t *testing.T) {
 	require.Equal(t, StatusAwaitingConsent, env.status(t).Status)
 }
 
-func TestConsentCannotBeReplaced(t *testing.T) {
+func TestConsentAfterFinishIsRejected(t *testing.T) {
 	env := newTestEnv(t)
 	consentId, state := env.start(t)
-	resp, _ := env.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: consentId, State: state})
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	env.consent(t, consentId, state)
+	env.finish(t)
 
-	resp, _ = env.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: env.fake.CreateConsent(), State: state})
+	resp, _ := env.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: env.fake.CreateConsent(), State: state})
 	require.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	// the known consent is still accepted (page reload)
+	resp, _ = env.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: consentId, State: state})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestMultiBankIssuanceFlow(t *testing.T) {
+	env := newTestEnv(t)
+	first, state := env.start(t)
+	env.consent(t, first, state)
+
+	second, state2 := env.addBank(t)
+	require.Equal(t, state, state2)
+	require.NotEqual(t, first, second)
+	status := env.consent(t, second, state2)
+	require.Equal(t, StatusAwaitingConsent, status.Status)
+	require.Equal(t, []BankStatus{{Provider: "fake-bank", Status: ConsentPending}, {Provider: "fake-bank-2", Status: ConsentPending}}, status.Banks)
+
+	env.finish(t)
+	status = env.status(t)
+	require.Equal(t, StatusReady, status.Status, status.Error)
+	require.Len(t, status.Credentials, len(credentials.AllKeys)+2) // three bank accounts at two banks
+
+	banks := map[string]string{}
+	for _, c := range status.Credentials {
+		if c.Key == credentials.BankAccount {
+			banks[c.Attributes["iban"]] = c.Attributes["bank"]
+		}
+	}
+	require.Equal(t, map[string]string{
+		"NL91ABNA0417164300": "fake-bank",
+		"NL20INGB0001234567": "fake-bank",
+		"NL02RABO0123456789": "fake-bank-2",
+	}, banks)
+
+	// one categorization job over both banks
+	require.Len(t, env.fake.JobRequests, 1)
+	require.Equal(t, env.session(t).UserId, env.fake.JobRequests[0].UserId)
+}
+
+func TestOneFailedBankDoesNotFailTheSession(t *testing.T) {
+	env := newTestEnv(t)
+	first, state := env.start(t)
+	env.consent(t, first, state)
+	second, _ := env.addBank(t)
+	env.consent(t, second, state)
+	env.fake.UpdateConsent(second, func(c *enablenow.Consent) { c.Status = enablenow.ConsentError })
+
+	env.finish(t)
+	status := env.status(t)
+	require.Equal(t, StatusReady, status.Status, status.Error)
+	require.Equal(t, []BankStatus{{Provider: "fake-bank", Status: ConsentReady}, {Provider: "fake-bank-2", Status: ConsentFailed}}, status.Banks)
+	require.Len(t, status.Credentials, len(credentials.AllKeys)+1) // two bank accounts at the remaining bank
+}
+
+func TestAddBankIsLimited(t *testing.T) {
+	env := newTestEnv(t)
+	consentId, state := env.start(t)
+	env.consent(t, consentId, state)
+	for range MaxBanks - 1 {
+		id, _ := env.addBank(t)
+		env.consent(t, id, state)
+	}
+
+	resp, body := env.do(t, http.MethodPost, "/api/session/add-bank", map[string]string{})
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+	require.Equal(t, ErrorTooManyBanks, string(body))
+
+	resp, body = env.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: env.fake.CreateConsent(), State: state})
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+	require.Equal(t, ErrorTooManyBanks, string(body))
+}
+
+func TestAddBankAfterFinishIsRejected(t *testing.T) {
+	env := newTestEnv(t)
+	consentId, state := env.start(t)
+	env.consent(t, consentId, state)
+	env.finish(t)
+
+	resp, body := env.do(t, http.MethodPost, "/api/session/add-bank", map[string]string{})
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+	require.Equal(t, ErrorInvalidState, string(body))
+}
+
+func TestFinishWithoutConsent(t *testing.T) {
+	env := newTestEnv(t)
+	env.start(t)
+
+	resp, body := env.do(t, http.MethodPost, "/api/session/finish", map[string]string{})
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+	require.Equal(t, ErrorNoConsent, string(body))
+	require.Equal(t, StatusAwaitingConsent, env.status(t).Status)
+}
+
+// failingUserClient is the fake enablenow, except that users cannot be created.
+type failingUserClient struct {
+	*enablenow.FakeClient
+}
+
+func (failingUserClient) CreateUser(_ context.Context, _ string) (*enablenow.User, error) {
+	return nil, &enablenow.ApiError{Method: "POST", Path: "/Users", StatusCode: 500}
+}
+
+func TestStartFailsWhenUserCannotBeCreated(t *testing.T) {
+	env := newTestEnv(t)
+	env.state.enablenow = failingUserClient{env.fake}
+
+	resp, body := env.do(t, http.MethodPost, "/api/session/start", map[string]string{})
+	require.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	require.Equal(t, ErrorEnablenow, string(body))
+}
+
+func TestNewStartDeletesPreviousUser(t *testing.T) {
+	env := newTestEnv(t)
+	consentId, state := env.start(t)
+	env.consent(t, consentId, state)
+	previous := env.session(t).UserId
+
+	env.start(t)
+	require.Equal(t, []string{previous}, env.fake.DeletedUsers)
 }
 
 func TestRequestsWithoutSession(t *testing.T) {
@@ -235,7 +413,8 @@ func TestIssueBeforeReadyIsRejected(t *testing.T) {
 func TestIssueWithoutKnownCredentials(t *testing.T) {
 	env := newTestEnv(t)
 	consentId, state := env.start(t)
-	env.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: consentId, State: state})
+	env.consent(t, consentId, state)
+	env.finish(t)
 	require.Equal(t, StatusReady, env.status(t).Status)
 
 	resp, _ := env.do(t, http.MethodPost, "/api/session/issue", IssuePayload{Credentials: []string{"nope"}})
@@ -245,7 +424,8 @@ func TestIssueWithoutKnownCredentials(t *testing.T) {
 func TestUnknownConsentFailsAfterRetries(t *testing.T) {
 	env := newTestEnv(t)
 	_, state := env.start(t)
-	env.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: "does-not-exist", State: state})
+	env.consent(t, "does-not-exist", state)
+	env.finish(t)
 
 	// every poll fails at enablenow; after MaxTransientErrors the session fails
 	require.Equal(t, StatusAwaitingTransactions, env.status(t).Status)
@@ -269,12 +449,13 @@ func TestStartIsRateLimited(t *testing.T) {
 func TestDeleteSession(t *testing.T) {
 	env := newTestEnv(t)
 	consentId, state := env.start(t)
-	env.do(t, http.MethodPost, "/api/session/consent", ConsentPayload{ConsentId: consentId, State: state})
+	env.consent(t, consentId, state)
+	userId := env.session(t).UserId
 
 	resp, _ := env.do(t, http.MethodDelete, "/api/session", nil)
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
-	// the in-progress consent is deleted at enablenow as well
-	require.Equal(t, []string{consentId}, env.fake.Deleted)
+	// the enablenow user with the in-progress consent is deleted as well
+	require.Equal(t, []string{userId}, env.fake.DeletedUsers)
 
 	resp, _ = env.do(t, http.MethodGet, "/api/session/status", nil)
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -287,14 +468,25 @@ func TestHealth(t *testing.T) {
 	require.JSONEq(t, `{"ok":true}`, string(body))
 }
 
+// appScreenClient builds real AppScreen URLs and fakes everything else.
+type appScreenClient struct {
+	*enablenow.FakeClient
+	real *enablenow.HttpClient
+}
+
+func (c appScreenClient) ConsentURL(redirectURI string, params url.Values) string {
+	return c.real.ConsentURL(redirectURI, params)
+}
+
 // TestStateTravelsInsideRedirectUri guards the AppScreen contract: only the
 // query parameters of redirect_uri are forwarded back, so the state must be
-// part of redirect_uri rather than a separate AppScreen parameter.
+// part of redirect_uri rather than a separate AppScreen parameter. The
+// consent is linked to the enablenow user through user_id.
 func TestStateTravelsInsideRedirectUri(t *testing.T) {
 	env := newTestEnv(t)
 	real, err := enablenow.NewHttpClient(enablenow.Config{ClientId: "client", ClientSecret: "secret"})
 	require.NoError(t, err)
-	env.state.enablenow = real
+	env.state.enablenow = appScreenClient{FakeClient: env.fake, real: real}
 
 	resp, body := env.do(t, http.MethodPost, "/api/session/start", map[string]string{})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -308,4 +500,5 @@ func TestStateTravelsInsideRedirectUri(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "/callback", redirect.Path)
 	require.NotEmpty(t, redirect.Query().Get("state"))
+	require.Equal(t, env.session(t).UserId, appScreen.Query().Get("user_id"))
 }

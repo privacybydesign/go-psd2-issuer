@@ -28,7 +28,14 @@ positive means received, negative means paid, so `housing.rent` is `-1050`
 and two-way categories such as `alimony.other` or `investment.savings` keep
 their direction. The current, incomplete month is not used. When the bank
 returns less history, the first partial month is skipped and `months` tells
-how many months the averages are based on. No values are derived: no totals,
+how many months the averages are based on.
+
+The user can connect up to 5 banks (e.g. salary at Rabobank, fixed costs at
+ABN AMRO); the amounts then cover all of them together. With several banks
+the period starts where the history of every bank is available, and
+transfers between the user's accounts at different banks are left out: they
+are neither income nor expenses. A bank whose connection fails is left out
+and the user is told so on the review page. No values are derived: no totals,
 yes/no flags or classifications.
 
 | Credential (`irma-demo.enablenow.*`) | E1 group | Attributes |
@@ -48,7 +55,7 @@ yes/no flags or classifications.
 | `lifestyle` | `expense.lifestyle.*` | `restaurantsbars`, `streaming`, `subscriptions`, `sports`, `culture`, `travel`, `donations`, `pets`, `other` |
 | `expense` | `expense.*` | `salary`, `other` |
 | `other` | `other.*` | `fines`, `privatetransfer`, `other` |
-| `bankaccount` (one per account) | accounts of the consent | `iban`, `accountholder`, `bank` |
+| `bankaccount` (one per account) | accounts of the connected banks | `iban`, `accountholder`, `bank` |
 
 All credentials except `bankaccount` also carry `months`, `periodstart` and
 `periodend`. Credentials expire after 90 days (`credential_validity_days`),
@@ -86,16 +93,21 @@ sequenceDiagram
     participant Y as Yivi app / IRMA server
 
     B->>I: POST /api/session/start
-    I-->>B: AppScreen URL (sets session cookie + state)
-    B->>E: bank login at app.enablenow.nl
-    E-->>B: redirect /callback?consent_id=…&state=…
-    B->>I: POST /api/session/consent (state checked)
+    I->>E: POST /Users (random externalUserId)
+    I-->>B: AppScreen URL with user_id (sets session cookie + state)
+    loop per bank, up to 5
+        B->>E: bank login at app.enablenow.nl
+        E-->>B: redirect /callback?consent_id=…&state=…
+        B->>I: POST /api/session/consent (state checked)
+        B->>I: POST /api/session/add-bank (another bank) → AppScreen URL
+    end
+    B->>I: POST /api/session/finish
     loop GET /api/session/status, every 2 s
-        I->>E: GET /v2/consents/{id} until transactions are available
-        I->>E: POST /v2/categorization-jobs (or reuse the auto-started job)
+        I->>E: GET /v2/consents/{id} per bank until transactions are available
+        I->>E: POST /v2/categorization-jobs per consent (one bank) or per user (several banks), with internal_ibans
         I->>E: GET /v2/categorization-jobs/{id} until COMPLETED
-        I->>E: GET /Transactions, /Accounts
-        I->>E: DELETE /v2/consents/{id} (bank data removed)
+        I->>E: GET /Transactions, /Accounts per bank
+        I->>E: DELETE /Users (user, consents and bank data removed)
     end
     I-->>B: status ready + computed values (review page)
     B->>I: POST /api/session/issue {credentials: [...]}
@@ -105,9 +117,11 @@ sequenceDiagram
 
 The flow is driven entirely by the status polls: there are no background
 workers, and any instance can handle any request because sessions live in
-Redis. Once the credentials are computed the consent is deleted at enablenow
-(unless `keep_consent` is set), and the session with the computed values
-expires after 30 minutes or when the user finishes.
+Redis. Once the credentials are computed the enablenow user is deleted, and
+with it every consent and all bank data (unless `keep_consent` is set), and
+the session with the computed values expires after 30 minutes or when the user
+finishes. A bank that fails or is still not done after the step timeout is
+left out as long as another bank succeeded.
 
 ## Demo verifier
 

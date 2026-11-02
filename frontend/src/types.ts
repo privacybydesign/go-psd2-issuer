@@ -16,9 +16,20 @@ export type SessionStatus =
   | 'ready'
   | 'failed';
 
+// MAX_BANKS matches MaxBanks in the backend.
+export const MAX_BANKS = 5;
+
+export interface BankStatus {
+  // enablenow provider key, e.g. RABONL2U
+  provider: string;
+  status: 'pending' | 'ready' | 'failed';
+}
+
 export interface StatusResponse {
   status: SessionStatus;
   error?: string;
+  // the connected banks, in the order they were connected
+  banks?: BankStatus[];
   credentials?: Credential[];
 }
 
