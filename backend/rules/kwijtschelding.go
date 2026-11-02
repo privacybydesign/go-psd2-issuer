@@ -1,6 +1,9 @@
 package rules
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // Kwijtschelding (remission) of municipal and water board taxes, per
 // chapter IV of the Uitvoeringsregeling Invorderingswet 1990 (art. 27, 28),
@@ -55,9 +58,9 @@ var KwijtscheldingVersions = []KwijtscheldingVersion{
 
 func kwijtscheldingVersionAt(t time.Time) (KwijtscheldingVersion, error) {
 	date := dutchDate(t)
-	for i := len(KwijtscheldingVersions) - 1; i >= 0; i-- {
-		if KwijtscheldingVersions[i].ValidFrom <= date {
-			return KwijtscheldingVersions[i], nil
+	for _, v := range slices.Backward(KwijtscheldingVersions) {
+		if v.ValidFrom <= date {
+			return v, nil
 		}
 	}
 	return KwijtscheldingVersion{}, ErrNoVersion

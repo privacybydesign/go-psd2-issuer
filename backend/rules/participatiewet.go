@@ -2,6 +2,7 @@ package rules
 
 import (
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -31,9 +32,9 @@ var ErrNoVersion = errors.New("no version of the law known for this date")
 // VersionAt returns the version in force on the (Dutch) date of t.
 func VersionAt(t time.Time) (Version, error) {
 	date := dutchDate(t)
-	for i := len(Versions) - 1; i >= 0; i-- {
-		if Versions[i].ValidFrom <= date {
-			return Versions[i], nil
+	for _, v := range slices.Backward(Versions) {
+		if v.ValidFrom <= date {
+			return v, nil
 		}
 	}
 	return Version{}, ErrNoVersion
