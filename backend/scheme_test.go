@@ -30,7 +30,7 @@ func TestSchemeMatchesCredentials(t *testing.T) {
 	computed := credentials.Compute(accounts, nil, "bank", credentials.Options{Now: now})
 
 	for _, cred := range computed {
-		path := filepath.Join("..", "scheme", "irma-demo", "enablenow", "Issues", cred.Key, "description.xml")
+		path := filepath.Join("..", "scheme", "pbdf-staging", "pbdf", "Issues", cred.Key, "description.xml")
 		content, err := os.ReadFile(path)
 		require.NoError(t, err)
 
@@ -52,7 +52,7 @@ func TestSchemeMatchesCredentials(t *testing.T) {
 	}
 
 	// and no credentials that are no longer issued
-	entries, err := os.ReadDir(filepath.Join("..", "scheme", "irma-demo", "enablenow", "Issues"))
+	entries, err := os.ReadDir(filepath.Join("..", "scheme", "pbdf-staging", "pbdf", "Issues"))
 	require.NoError(t, err)
 	var dirs []string
 	for _, entry := range entries {

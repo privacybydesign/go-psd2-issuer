@@ -15,3 +15,4 @@ build/
 local-secrets/
 .env
 local-secrets/psd2-issuer/config.json
+__pycache__/

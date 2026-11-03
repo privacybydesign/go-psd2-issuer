@@ -33,7 +33,7 @@ type Config struct {
 
 	// CredentialPrefix is prepended to the credential keys (income, housing,
 	// debts, benefits, bankaccount) to form the Yivi credential ids, e.g.
-	// "irma-demo.enablenow". Entries in Credentials override single ids.
+	// "pbdf-staging.pbdf". Entries in Credentials override single ids.
 	CredentialPrefix string            `json:"credential_prefix"`
 	Credentials      map[string]string `json:"credentials,omitempty"`
 	// CredentialValidityDays is how long issued credentials stay valid.
