@@ -15,6 +15,8 @@ import (
 	redis "psd2-issuer/redis"
 	"strings"
 	"time"
+
+	"github.com/privacybydesign/irmago/irma"
 )
 
 type Config struct {
@@ -38,6 +40,9 @@ type Config struct {
 	Credentials      map[string]string `json:"credentials,omitempty"`
 	// CredentialValidityDays is how long issued credentials stay valid.
 	CredentialValidityDays int `json:"credential_validity_days,omitempty"`
+	// SdJwtBatchSize is how many SD-JWTs the IRMA server issues per
+	// credential (default 50, at most 200).
+	SdJwtBatchSize uint `json:"sd_jwt_batch_size,omitempty"`
 
 	// EnablenowBackend is "enablenow" for the real API or "fake" for local
 	// development with synthetic data.
@@ -121,6 +126,13 @@ func createServerState(config *Config) (*ServerState, error) {
 	if validityDays == 0 {
 		validityDays = 90
 	}
+	sdJwtBatchSize := config.SdJwtBatchSize
+	if sdJwtBatchSize == 0 {
+		sdJwtBatchSize = irma.DefaultSdJwtIssueAmount
+	}
+	if sdJwtBatchSize > irma.MaxSdJwtIssueAmount {
+		return nil, fmt.Errorf("sd_jwt_batch_size must be at most %d", irma.MaxSdJwtIssueAmount)
+	}
 	credentialIds, err := credentialIds(config)
 	if err != nil {
 		return nil, err
@@ -130,6 +142,7 @@ func createServerState(config *Config) (*ServerState, error) {
 		config.IssuerId,
 		credentialIds,
 		time.Duration(validityDays)*24*time.Hour,
+		sdJwtBatchSize,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to instantiate jwt creator: %w", err)

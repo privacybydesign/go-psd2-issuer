@@ -10,6 +10,7 @@
     "public_url": "http://localhost:8080",
     "credential_prefix": "pbdf-staging.pbdf",
     "credential_validity_days": 90,
+    "sd_jwt_batch_size": 50,
     "enablenow_backend": "enablenow",
     "enablenow_config": {
         "client_id": "",
