@@ -41,7 +41,8 @@ type Config struct {
 	// CredentialValidityDays is how long issued credentials stay valid.
 	CredentialValidityDays int `json:"credential_validity_days,omitempty"`
 	// SdJwtBatchSize is how many SD-JWTs the IRMA server issues per
-	// credential (default 50, at most 200).
+	// credential, at most 200. When it is 0 or left out, only IRMA (Idemix)
+	// credentials are issued.
 	SdJwtBatchSize uint `json:"sd_jwt_batch_size,omitempty"`
 
 	// EnablenowBackend is "enablenow" for the real API or "fake" for local
@@ -126,11 +127,7 @@ func createServerState(config *Config) (*ServerState, error) {
 	if validityDays == 0 {
 		validityDays = 90
 	}
-	sdJwtBatchSize := config.SdJwtBatchSize
-	if sdJwtBatchSize == 0 {
-		sdJwtBatchSize = irma.DefaultSdJwtIssueAmount
-	}
-	if sdJwtBatchSize > irma.MaxSdJwtIssueAmount {
+	if config.SdJwtBatchSize > irma.MaxSdJwtIssueAmount {
 		return nil, fmt.Errorf("sd_jwt_batch_size must be at most %d", irma.MaxSdJwtIssueAmount)
 	}
 	credentialIds, err := credentialIds(config)
@@ -142,7 +139,7 @@ func createServerState(config *Config) (*ServerState, error) {
 		config.IssuerId,
 		credentialIds,
 		time.Duration(validityDays)*24*time.Hour,
-		sdJwtBatchSize,
+		config.SdJwtBatchSize,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to instantiate jwt creator: %w", err)
