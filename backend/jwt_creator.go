@@ -49,7 +49,8 @@ type DefaultJwtCreator struct {
 	// credential type id (e.g. "pbdf-staging.pbdf.income").
 	credentialIds map[string]string
 	validity      time.Duration
-	// sdJwtBatchSize is how many SD-JWTs the IRMA server issues per credential.
+	// sdJwtBatchSize is how many SD-JWTs the IRMA server issues per
+	// credential; 0 means none, only the IRMA credential.
 	sdJwtBatchSize uint
 	now            func() time.Time
 }

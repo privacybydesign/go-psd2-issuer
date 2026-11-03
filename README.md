@@ -195,8 +195,9 @@ See [`config.example.json`](config.example.json).
 - `credential_prefix` builds the credential ids (`<prefix>.income`, ...);
   `credentials` can override single ids, e.g.
   `{"income": "pbdf.pbdf.income"}`.
-- `sd_jwt_batch_size`: how many SD-JWTs the IRMA server issues per
-  credential (default 50, at most 200).
+- `sd_jwt_batch_size` (optional): how many SD-JWTs the IRMA server issues
+  per credential, at most 200. Left out or 0, only IRMA (Idemix) credentials
+  are issued.
 - `enablenow_backend`: `enablenow` or `fake`. `enablenow_config` holds the
   client id and secret (client credentials grant, scope `customer-api`) and
   optionally `api_url`, `app_url`, `token_url` and `scope`.
