@@ -80,7 +80,7 @@ func testDisclosure(law rules.Law, dateOfBirth string, values map[string]string)
 		if !ok {
 			value = "0"
 		}
-		cons[i] = append(cons[i], disclosed("irma-demo.enablenow."+fact, value))
+		cons[i] = append(cons[i], disclosed("pbdf-staging.pbdf."+fact, value))
 	}
 	cons = append(cons, []any{disclosed(DefaultDateOfBirthAttribute, dateOfBirth)})
 	if law.NeedsPostcode {
@@ -95,7 +95,7 @@ func newVerifierTestEnv(t *testing.T) (*testEnv, *fakeIrmaServer) {
 	irmaServer := newFakeIrmaServer(t)
 	ids := map[string]string{}
 	for _, key := range credentials.AllKeys {
-		ids[key] = "irma-demo.enablenow." + key
+		ids[key] = "pbdf-staging.pbdf." + key
 	}
 	verifier, err := NewVerifier(irmaServer.server.URL+"/", env.state.jwtCreator.(*DefaultJwtCreator), ids, "", "")
 	require.NoError(t, err)
@@ -154,10 +154,10 @@ func TestVerifierBijstandFlow(t *testing.T) {
 	// postcode, all required
 	attributes := requested(t, irmaServer.request)
 	require.Len(t, attributes, len(law(t, "bijstand").Attributes)+2)
-	require.Contains(t, attributes, "irma-demo.enablenow.income.salary")
+	require.Contains(t, attributes, "pbdf-staging.pbdf.income.salary")
 	require.Contains(t, attributes, DefaultDateOfBirthAttribute)
 	require.Contains(t, attributes, DefaultPostcodeAttribute)
-	require.NotContains(t, attributes, "irma-demo.enablenow.subsidy.rent")
+	require.NotContains(t, attributes, "pbdf-staging.pbdf.subsidy.rent")
 
 	irmaServer.result["disclosed"] = testDisclosure(law(t, "bijstand"), "15-03-1985", map[string]string{"income.salary": "900"})
 	resp, body = env.do(t, http.MethodGet, "/api/verifier/result", nil)
@@ -198,8 +198,8 @@ func TestVerifierKwijtschelding(t *testing.T) {
 	resp, body := env.do(t, http.MethodPost, "/api/verifier/start", VerifierStartPayload{Law: "kwijtschelding_gemeente", TaxAssessment: 450})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	attributes := requested(t, irmaServer.request)
-	require.Contains(t, attributes, "irma-demo.enablenow.housing.rent")
-	require.Contains(t, attributes, "irma-demo.enablenow.subsidy.rent")
+	require.Contains(t, attributes, "pbdf-staging.pbdf.housing.rent")
+	require.Contains(t, attributes, "pbdf-staging.pbdf.subsidy.rent")
 	// remission does not depend on where you live, so the postcode is not
 	// asked for
 	require.NotContains(t, attributes, DefaultPostcodeAttribute)

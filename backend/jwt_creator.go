@@ -44,7 +44,7 @@ type DefaultJwtCreator struct {
 	privateKey *rsa.PrivateKey
 	issuerId   string
 	// credentialIds maps a credential key (e.g. "income") to the full Yivi
-	// credential type id (e.g. "irma-demo.enablenow.income").
+	// credential type id (e.g. "pbdf-staging.pbdf.income").
 	credentialIds map[string]string
 	validity      time.Duration
 	now           func() time.Time

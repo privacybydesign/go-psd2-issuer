@@ -20,9 +20,11 @@ monthly averages), plus bankaccount. Modeled on go-sms-issuer.
 - `backend/credentials/definitions.json`: single source of truth for all
   credentials and attributes (with en/nl texts). The backend embeds it,
   `scheme/generate.py` reads it, the frontend fetches it from
-  `/api/definitions`. After changing it, regenerate `scheme/` (and the copy in
-  irma-demo-schememanager, which then needs re-signing); `scheme_test.go`
-  checks the backend and scheme agree.
+  `/api/definitions`. The credentials live in the shared `pbdf` issuer of the
+  pbdf-staging scheme (`pbdf-staging.pbdf.<key>`). After changing it,
+  regenerate `scheme/` (and the copy in pbdf-staging, which then needs
+  re-signing); `scheme_test.go` checks the backend and scheme agree. The
+  generator never touches the issuer, logos or other pbdf credentials.
 - `backend/enablenow/`: API client (`HttpClient`) and `FakeClient`.
 - `backend/flow.go`: poll-driven state machine; no background goroutines.
 - `backend/rules/` + `backend/verifier.go`: demo verifier. Each law in
