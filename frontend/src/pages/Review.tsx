@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ApiError, getStatus, issue } from '../api';
-import { Alert, AttributeTable, CredentialTitle, isEmpty, Page, useDefinitions } from '../components';
-import { Credential, CredentialKey, StatusResponse } from '../types';
+import { Alert, AttributeTable, CredentialTitle, FailedBanksAlert, isEmpty, Page, useDefinitions } from '../components';
+import { BankStatus, Credential, CredentialKey, StatusResponse } from '../types';
 
 export default function ReviewPage() {
   const navigate = useNavigate();
@@ -12,6 +12,7 @@ export default function ReviewPage() {
   const [credentials, setCredentials] = useState<Credential[] | undefined>(
     (location.state as StatusResponse | null)?.credentials,
   );
+  const [banks, setBanks] = useState<BankStatus[] | undefined>((location.state as StatusResponse | null)?.banks);
   const { definitions, error: definitionsError } = useDefinitions();
   // undefined until the defaults are known: every card with a non-zero amount
   const [chosenKeys, setSelected] = useState<Set<CredentialKey> | undefined>();
@@ -26,6 +27,7 @@ export default function ReviewPage() {
       .then((response) => {
         if (response.status === 'ready' && response.credentials) {
           setCredentials(response.credentials);
+          setBanks(response.banks);
         } else {
           navigate(`/${i18n.language}/progress`, { replace: true });
         }
@@ -110,6 +112,7 @@ export default function ReviewPage() {
         {message && <Alert kind="success">{message}</Alert>}
         {errorMessage && <Alert kind="danger">{errorMessage}</Alert>}
         {definitionsError !== undefined && <Alert kind="danger">{t('definitions_error')}</Alert>}
+        <FailedBanksAlert banks={banks} />
         <p>{t('review_explanation')}</p>
         <ul className="credential-list">
           {definitions && groups.map(({ key, definition, credentials }) => (

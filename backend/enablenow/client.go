@@ -21,15 +21,21 @@ import (
 // the flow can be tested against a fake and run locally without credentials.
 type Client interface {
 	// ConsentURL returns the AppScreen URL the end-user is sent to in order to
-	// connect a bank account. extraParams are forwarded back to redirectURI.
-	ConsentURL(redirectURI string, extraParams url.Values) string
+	// connect a bank account. params are extra AppScreen parameters, such as
+	// user_id; only the query parameters of redirectURI come back.
+	ConsentURL(redirectURI string, params url.Values) string
+	// CreateUser creates a user that consents can be linked to.
+	CreateUser(ctx context.Context, externalUserId string) (*User, error)
+	// DeleteUser deletes the user with all its consents, accounts and
+	// transactions.
+	DeleteUser(ctx context.Context, userId string) error
 	GetConsent(ctx context.Context, consentId string) (*Consent, error)
 	DeleteConsent(ctx context.Context, consentId string) error
 	ListAccounts(ctx context.Context, consentId string) ([]Account, error)
 	// ListTransactions returns all transactions of the consent booked in
 	// [from, to), following pagination.
 	ListTransactions(ctx context.Context, consentId string, from, to time.Time) ([]Transaction, error)
-	ListCategorizationJobs(ctx context.Context, consentId string) ([]Job, error)
+	ListCategorizationJobs(ctx context.Context, filter JobFilter) ([]Job, error)
 	CreateCategorizationJob(ctx context.Context, req JobRequest) (*Job, error)
 	GetCategorizationJob(ctx context.Context, jobId string) (*Job, error)
 }
@@ -109,12 +115,12 @@ func NewHttpClient(config Config) (*HttpClient, error) {
 	}, nil
 }
 
-func (c *HttpClient) ConsentURL(redirectURI string, extraParams url.Values) string {
-	params := url.Values{}
-	maps.Copy(params, extraParams)
-	params.Set("client", c.config.ClientId)
-	params.Set("redirect_uri", redirectURI)
-	return c.config.AppUrl + "?" + params.Encode()
+func (c *HttpClient) ConsentURL(redirectURI string, params url.Values) string {
+	all := url.Values{}
+	maps.Copy(all, params)
+	all.Set("client", c.config.ClientId)
+	all.Set("redirect_uri", redirectURI)
+	return c.config.AppUrl + "?" + all.Encode()
 }
 
 type tokenResponse struct {
@@ -262,6 +268,22 @@ func truncate(s string) string {
 	return s
 }
 
+func (c *HttpClient) CreateUser(ctx context.Context, externalUserId string) (*User, error) {
+	var user User
+	body := map[string]string{"externalUserId": externalUserId}
+	if err := c.do(ctx, http.MethodPost, "/Users", nil, body, &user); err != nil {
+		return nil, err
+	}
+	if user.Id == "" {
+		return nil, errors.New("enablenow returned a user without id")
+	}
+	return &user, nil
+}
+
+func (c *HttpClient) DeleteUser(ctx context.Context, userId string) error {
+	return c.do(ctx, http.MethodDelete, "/Users", url.Values{"UserId": {userId}}, nil, nil)
+}
+
 func (c *HttpClient) GetConsent(ctx context.Context, consentId string) (*Consent, error) {
 	var consent Consent
 	err := c.do(ctx, http.MethodGet, "/v2/consents/"+url.PathEscape(consentId), nil, nil, &consent)
@@ -319,9 +341,16 @@ func (c *HttpClient) ListTransactions(ctx context.Context, consentId string, fro
 	return nil, fmt.Errorf("transactions for consent exceed %d pages", maxPages)
 }
 
-func (c *HttpClient) ListCategorizationJobs(ctx context.Context, consentId string) ([]Job, error) {
+func (c *HttpClient) ListCategorizationJobs(ctx context.Context, filter JobFilter) ([]Job, error) {
+	query := url.Values{}
+	if filter.ConsentId != "" {
+		query.Set("consentId", filter.ConsentId)
+	}
+	if filter.ExternalUserId != "" {
+		query.Set("externalUserId", filter.ExternalUserId)
+	}
 	var jobs []Job
-	err := c.do(ctx, http.MethodGet, "/v2/categorization-jobs", url.Values{"consentId": {consentId}}, nil, &jobs)
+	err := c.do(ctx, http.MethodGet, "/v2/categorization-jobs", query, nil, &jobs)
 	if err != nil {
 		if IsNotFound(err) {
 			return nil, nil
@@ -343,7 +372,7 @@ func (c *HttpClient) CreateCategorizationJob(ctx context.Context, req JobRequest
 		if id == "" {
 			return nil, errors.New("enablenow returned an empty categorization job id")
 		}
-		return &Job{Id: id, Status: JobPending, Engine: req.Engine, Profile: req.Profile, ConsentId: req.ConsentId}, nil
+		return &Job{Id: id, Status: JobPending, Engine: req.Engine, Profile: req.Profile, ConsentId: req.ConsentId, UserId: req.UserId}, nil
 	}
 	var job Job
 	if err := json.Unmarshal(raw, &job); err != nil {

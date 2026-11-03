@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getDefinitions } from './api';
-import { AttributeDefinition, Credential, CredentialDefinition, Definitions, Translated } from './types';
+import { AttributeDefinition, BankStatus, Credential, CredentialDefinition, Definitions, Translated } from './types';
 
 export function Page({ title, children, footer }: { title: string; children: ReactNode; footer?: ReactNode }) {
   return (
@@ -114,4 +114,26 @@ export function CredentialTitle({ definition }: { definition: CredentialDefiniti
       <p>{translate(definition.description, i18n.language)}</p>
     </>
   );
+}
+
+export function BankList({ banks }: { banks: BankStatus[] }) {
+  const { t } = useTranslation();
+  return (
+    <ul className="bank-list">
+      {banks.map((bank, i) => (
+        <li key={i} className={`bank bank-${bank.status}`}>
+          <span className="bank-name">{bank.provider}</span>
+          <span className="bank-status">{t(`bank_status_${bank.status}`)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// FailedBanksAlert names the banks whose data is missing from the analysis.
+export function FailedBanksAlert({ banks }: { banks: BankStatus[] | undefined }) {
+  const { t } = useTranslation();
+  const failed = (banks ?? []).filter((bank) => bank.status === 'failed').map((bank) => bank.provider);
+  if (failed.length === 0) return null;
+  return <Alert kind="danger">{t('review_failed_banks', { banks: failed.join(', ') })}</Alert>;
 }

@@ -43,7 +43,24 @@ func byKey(creds []Credential) map[string]map[string]string {
 }
 
 func compute(txs []enablenow.Transaction) map[string]map[string]string {
-	return byKey(Compute(nil, txs, "bank", Options{Months: 12, Rounding: 10, Now: now}))
+	return byKey(Compute([]Bank{{ProviderKey: "bank", Transactions: txs}}, Options{Months: 12, Rounding: 10, Now: now}))
+}
+
+// transfer is a transaction with a counterpart account.
+func transfer(date string, amount float64, category, counterpart string) enablenow.Transaction {
+	t := tx(date, amount, category)
+	t.CounterpartAccountNumber = counterpart
+	return t
+}
+
+func bankAccounts(creds []Credential) []map[string]string {
+	var accs []map[string]string
+	for _, c := range creds {
+		if c.Key == BankAccount {
+			accs = append(accs, c.Attributes)
+		}
+	}
+	return accs
 }
 
 func TestWindowIsLastFullMonths(t *testing.T) {
@@ -196,7 +213,7 @@ func TestIgnoresUncategorizedForeignAndLowConfidence(t *testing.T) {
 	unsure.Category.E1.Confidence = 0.1
 	sure := tx("2025-10-01", 1200, "income.salary")
 
-	creds := Compute(nil, []enablenow.Transaction{uncategorized, foreign, unsure, sure}, "bank",
+	creds := Compute([]Bank{{ProviderKey: "bank", Transactions: []enablenow.Transaction{uncategorized, foreign, unsure, sure}}},
 		Options{Months: 12, Rounding: 10, MinConfidence: 0.5, Now: now})
 	require.Equal(t, "100", byKey(creds)["income"]["salary"])
 }
@@ -208,14 +225,7 @@ func TestBankAccounts(t *testing.T) {
 		{Iban: ""},                   // no IBAN, e.g. a credit card
 		{Iban: "NL20INGB0001234567", AccountHolder: "J. Jansen"},
 	}
-	creds := Compute(accounts, nil, "ing", Options{Now: now})
-
-	var accs []map[string]string
-	for _, c := range creds {
-		if c.Key == BankAccount {
-			accs = append(accs, c.Attributes)
-		}
-	}
+	accs := bankAccounts(Compute([]Bank{{ProviderKey: "ing", Accounts: accounts}}, Options{Now: now}))
 	require.Len(t, accs, 2)
 	require.Equal(t, map[string]string{"iban": "NL91ABNA0417164300", "accountholder": "J. Jansen", "bank": "ing"}, accs[0])
 	require.Equal(t, "NL20INGB0001234567", accs[1]["iban"])
@@ -232,7 +242,7 @@ func TestFakeClientData(t *testing.T) {
 	accounts, err := fake.ListAccounts(t.Context(), consent)
 	require.NoError(t, err)
 
-	creds := Compute(accounts, txs, "fake-bank", opts)
+	creds := Compute([]Bank{{ProviderKey: "fake-bank", Accounts: accounts, Transactions: txs}}, opts)
 	require.Len(t, creds, len(AllKeys)+1) // two bank accounts
 	got := byKey(creds)
 	require.Equal(t, "3220", got["income"]["salary"])
@@ -248,4 +258,106 @@ func TestRounding(t *testing.T) {
 	require.Equal(t, "0", roundAmount(4, 10))
 	require.Equal(t, "-1050", roundAmount(-1053, 10))
 	require.Equal(t, "0", roundAmount(-4, 10))
+}
+
+func TestCombinesBanks(t *testing.T) {
+	rabo := Bank{
+		ProviderKey:  "RABONL2U",
+		Accounts:     []enablenow.Account{{Id: "r1", Iban: "NL02RABO0123456789", AccountHolder: "J. Jansen"}},
+		Transactions: append(monthly(25, 3000, "income.salary"), monthly(1, -1050, "housing.rent")...),
+	}
+	abn := Bank{
+		ProviderKey:  "ABNANL2A",
+		Accounts:     []enablenow.Account{{Id: "a1", Iban: "NL91ABNA0417164300", AccountHolder: "J. Jansen"}},
+		Transactions: append(monthly(15, 150, "income.other"), monthly(1, -30, "housing.rent")...),
+	}
+	creds := Compute([]Bank{rabo, abn}, Options{Months: 12, Rounding: 10, Now: now})
+
+	got := byKey(creds)
+	require.Equal(t, "3000", got["income"]["salary"])
+	require.Equal(t, "150", got["income"]["other"])
+	require.Equal(t, "-1080", got["housing"]["rent"])
+	require.Equal(t, "12", got["income"]["months"])
+
+	accs := bankAccounts(creds)
+	require.Equal(t, []map[string]string{
+		{"iban": "NL02RABO0123456789", "accountholder": "J. Jansen", "bank": "RABONL2U"},
+		{"iban": "NL91ABNA0417164300", "accountholder": "J. Jansen", "bank": "ABNANL2A"},
+	}, accs)
+}
+
+func TestTransfersBetweenOwnBanksAreIgnored(t *testing.T) {
+	var raboTxs, abnTxs []enablenow.Transaction
+	raboTxs = append(raboTxs, monthly(25, 3000, "income.salary")...)
+	// E1 does not know the ABN AMRO account is the user's own
+	for _, tr := range monthly(26, -500, "other.private_transfer") {
+		tr.CounterpartAccountNumber = "nl91 abna 0417 1643 00"
+		raboTxs = append(raboTxs, tr)
+	}
+	// a transfer to someone else is a real private transfer
+	raboTxs = append(raboTxs, transfer("2026-02-03", -1200, "other.private_transfer", "NL20INGB0001234567"))
+	// moving money to a savings account at the same bank stays as E1 decided
+	raboTxs = append(raboTxs, transfer("2026-02-04", -1200, "investment.savings", "NL55RABO0987654321"))
+	for _, tr := range monthly(26, 500, "other.private_transfer") {
+		tr.CounterpartAccountNumber = "NL02RABO0123456789"
+		abnTxs = append(abnTxs, tr)
+	}
+
+	creds := Compute([]Bank{
+		{ProviderKey: "RABONL2U", Transactions: raboTxs, Accounts: []enablenow.Account{
+			{Id: "r1", Iban: "NL02RABO0123456789"}, {Id: "r2", Iban: "NL55RABO0987654321"},
+		}},
+		{ProviderKey: "ABNANL2A", Transactions: abnTxs, Accounts: []enablenow.Account{{Id: "a1", Iban: "NL91ABNA0417164300"}}},
+	}, Options{Months: 12, Rounding: 10, Now: now})
+
+	got := byKey(creds)
+	require.Equal(t, "3000", got["income"]["salary"])
+	require.Equal(t, "-100", got["other"]["privatetransfer"])
+	require.Equal(t, "-100", got["investment"]["savings"])
+}
+
+func TestPeriodIsCoveredByAllBanks(t *testing.T) {
+	// Rabobank returns a full year, ABN AMRO only from mid June: June is
+	// partial, so only July-September are covered by both
+	abn := []enablenow.Transaction{
+		tx("2026-06-17", 100, "income.other"),
+		tx("2026-07-15", 100, "income.other"),
+		tx("2026-08-15", 100, "income.other"),
+		tx("2026-09-15", 100, "income.other"),
+	}
+	creds := Compute([]Bank{
+		{ProviderKey: "RABONL2U", Transactions: monthly(25, 3000, "income.salary")},
+		{ProviderKey: "ABNANL2A", Transactions: abn},
+	}, Options{Months: 12, Rounding: 10, Now: now})
+
+	income := byKey(creds)["income"]
+	require.Equal(t, "3", income["months"])
+	require.Equal(t, "2026-07-01", income["periodstart"])
+	require.Equal(t, "3000", income["salary"])
+	require.Equal(t, "100", income["other"])
+}
+
+func TestBankWithoutTransactionsDoesNotShortenPeriod(t *testing.T) {
+	creds := Compute([]Bank{
+		{ProviderKey: "RABONL2U", Transactions: monthly(25, 3000, "income.salary")},
+		{ProviderKey: "ABNANL2A", Accounts: []enablenow.Account{{Id: "a1", Iban: "NL91ABNA0417164300"}}},
+	}, Options{Months: 12, Rounding: 10, Now: now})
+
+	income := byKey(creds)["income"]
+	require.Equal(t, "12", income["months"])
+	require.Equal(t, "3000", income["salary"])
+	require.Len(t, bankAccounts(creds), 1)
+}
+
+func TestBankAccountsAreUniqueAcrossBanks(t *testing.T) {
+	creds := Compute([]Bank{
+		{ProviderKey: "RABONL2U", Accounts: []enablenow.Account{{Iban: "NL02RABO0123456789"}}},
+		{ProviderKey: "RABONL2U", Accounts: []enablenow.Account{{Iban: "NL02 RABO 0123 4567 89"}}},
+	}, Options{Now: now})
+	require.Len(t, bankAccounts(creds), 1)
+}
+
+func TestNormalizeIban(t *testing.T) {
+	require.Equal(t, "NL91ABNA0417164300", NormalizeIban(" nl91 abna 0417 1643 00 "))
+	require.Equal(t, "", NormalizeIban(""))
 }

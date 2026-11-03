@@ -46,11 +46,20 @@ func Window(opts Options) (from, to time.Time) {
 	return from, to
 }
 
-// Compute derives all credentials from the accounts and transactions of a
-// consent. providerKey identifies the bank. Transactions outside the window,
-// in a foreign currency or without an E1 category are ignored, as are E1
-// codes that are not in the definitions (internal.other, corporate codes).
-func Compute(accounts []enablenow.Account, transactions []enablenow.Transaction, providerKey string, opts Options) []Credential {
+// Bank holds the accounts and transactions of one consent.
+type Bank struct {
+	// ProviderKey identifies the bank, e.g. RABONL2U.
+	ProviderKey  string
+	Accounts     []enablenow.Account
+	Transactions []enablenow.Transaction
+}
+
+// Compute derives all credentials from the accounts and transactions of one
+// or more banks of the same user. Transactions outside the window, in a
+// foreign currency or without an E1 category are ignored, as are E1 codes that
+// are not in the definitions (internal.other, corporate codes) and transfers
+// between the user's accounts at different banks.
+func Compute(banks []Bank, opts Options) []Credential {
 	if opts.Months <= 0 {
 		opts.Months = 12
 	}
@@ -58,7 +67,7 @@ func Compute(accounts []enablenow.Account, transactions []enablenow.Transaction,
 		opts.Rounding = 1
 	}
 
-	p := newPeriod(transactions, opts)
+	p := newPeriod(banks, opts)
 	months := float64(p.months)
 
 	var creds []Credential
@@ -79,17 +88,19 @@ func Compute(accounts []enablenow.Account, transactions []enablenow.Transaction,
 
 	// one bank account credential per account with an IBAN
 	seen := map[string]bool{}
-	for _, account := range accounts {
-		iban := normalizeIban(account.Iban)
-		if iban == "" || seen[iban] {
-			continue
+	for _, bank := range banks {
+		for _, account := range bank.Accounts {
+			iban := NormalizeIban(account.Iban)
+			if iban == "" || seen[iban] {
+				continue
+			}
+			seen[iban] = true
+			creds = append(creds, Credential{Key: BankAccount, Attributes: map[string]string{
+				"iban":          iban,
+				"accountholder": strings.TrimSpace(account.AccountHolder),
+				"bank":          bank.ProviderKey,
+			}})
 		}
-		seen[iban] = true
-		creds = append(creds, Credential{Key: BankAccount, Attributes: map[string]string{
-			"iban":          iban,
-			"accountholder": strings.TrimSpace(account.AccountHolder),
-			"bank":          providerKey,
-		}})
 	}
 
 	return creds
@@ -103,8 +114,18 @@ type period struct {
 	totals map[string]float64
 }
 
-func newPeriod(transactions []enablenow.Transaction, opts Options) *period {
+func newPeriod(banks []Bank, opts Options) *period {
 	from, to := Window(opts)
+
+	// which bank each of the user's accounts is at
+	bankOf := map[string]int{}
+	for i, bank := range banks {
+		for _, account := range bank.Accounts {
+			if iban := NormalizeIban(account.Iban); iban != "" {
+				bankOf[iban] = i
+			}
+		}
+	}
 
 	type dated struct {
 		date     time.Time
@@ -112,35 +133,35 @@ func newPeriod(transactions []enablenow.Transaction, opts Options) *period {
 		category string
 	}
 	var relevant []dated
-	var earliest time.Time
-	for _, tx := range transactions {
-		date, ok := tx.Date()
-		if !ok || date.Before(from) || !date.Before(to) {
-			continue
-		}
-		if earliest.IsZero() || date.Before(earliest) {
-			earliest = date
-		}
-		if tx.Currency != "" && !strings.EqualFold(tx.Currency, "EUR") {
-			continue
-		}
-		code := tx.E1()
-		if code == "" || tx.Category.E1.Confidence < opts.MinConfidence {
-			continue
-		}
-		relevant = append(relevant, dated{date: date, amount: tx.Amount, category: code})
-	}
-
-	// When the bank history starts after the window does, the first month is
-	// only partially covered; skip it so it doesn't drag the averages down.
+	// The period starts where the history of every bank is available, so a
+	// bank that returns less history doesn't drag the averages down.
 	start := from
-	if !earliest.IsZero() {
-		firstMonth := time.Date(earliest.Year(), earliest.Month(), 1, 0, 0, 0, 0, time.UTC)
-		if firstMonth.After(from) {
-			start = firstMonth
-			if earliest.After(firstMonth) && firstMonth.AddDate(0, 1, 0).Before(to) {
-				start = firstMonth.AddDate(0, 1, 0)
+	for i, bank := range banks {
+		var earliest time.Time
+		for _, tx := range bank.Transactions {
+			date, ok := tx.Date()
+			if !ok || date.Before(from) || !date.Before(to) {
+				continue
 			}
+			if earliest.IsZero() || date.Before(earliest) {
+				earliest = date
+			}
+			if tx.Currency != "" && !strings.EqualFold(tx.Currency, "EUR") {
+				continue
+			}
+			// money moved between the user's own banks is neither income
+			// nor an expense
+			if other, ok := bankOf[NormalizeIban(tx.CounterpartAccountNumber)]; ok && other != i {
+				continue
+			}
+			code := tx.E1()
+			if code == "" || tx.Category.E1.Confidence < opts.MinConfidence {
+				continue
+			}
+			relevant = append(relevant, dated{date: date, amount: tx.Amount, category: code})
+		}
+		if bankStart := historyStart(earliest, from, to); bankStart.After(start) {
+			start = bankStart
 		}
 	}
 
@@ -164,12 +185,30 @@ func newPeriod(transactions []enablenow.Transaction, opts Options) *period {
 	return p
 }
 
+// historyStart is the first full month of a bank history that starts at
+// earliest. When the history starts after the window does, the first month is
+// only partially covered; it is skipped so it doesn't drag the averages down.
+func historyStart(earliest, from, to time.Time) time.Time {
+	if earliest.IsZero() {
+		return from
+	}
+	firstMonth := time.Date(earliest.Year(), earliest.Month(), 1, 0, 0, 0, 0, time.UTC)
+	if !firstMonth.After(from) {
+		return from
+	}
+	if earliest.After(firstMonth) && firstMonth.AddDate(0, 1, 0).Before(to) {
+		return firstMonth.AddDate(0, 1, 0)
+	}
+	return firstMonth
+}
+
 // roundAmount rounds a euro amount to the nearest multiple of step.
 func roundAmount(amount float64, step int) string {
 	s := float64(step)
 	return fmt.Sprint(int64(math.Round(amount/s) * s))
 }
 
-func normalizeIban(iban string) string {
+// NormalizeIban removes spaces and upper-cases an IBAN.
+func NormalizeIban(iban string) string {
 	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(iban), " ", ""))
 }

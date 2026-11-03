@@ -4,7 +4,7 @@ import LanguageDetector from 'i18next-browser-languagedetector';
 
 const en = {
     index_header: "Add financial data",
-    index_explanation: "Prove facts about your finances with Yivi, without handing over your bank statements. Connect your bank account once; we analyse your transactions of the last 12 months and you choose which of the following cards to add to your Yivi app.",
+    index_explanation: "Prove facts about your finances with Yivi, without handing over your bank statements. Connect your bank accounts once, at one or more banks; we analyse your transactions of the last 12 months and you choose which of the following cards to add to your Yivi app.",
     index_privacy: "Your bank connection is made through enablenow, a licensed account information service. After the analysis the connection and your transactions are deleted; only the cards you add are kept, in your own Yivi app.",
     index_start: "Connect bank",
     back: "Back",
@@ -12,6 +12,16 @@ const en = {
 
 
     callback_header: "Bank connected",
+    banks_header: "Your banks",
+    banks_explanation: "Do you also bank elsewhere, for example your salary at one bank and your fixed costs at another? Connect that bank too, so the analysis covers all your income and expenses. Transfers between your own accounts are not counted.",
+    banks_add: "Connect another bank",
+    banks_continue: "Continue",
+    banks_max: "You can connect at most {{max}} banks.",
+    banks_not_connected: "The last bank was not connected. You can try again or continue with the banks below.",
+    bank_status_pending: "Connected",
+    bank_status_ready: "Transactions retrieved",
+    bank_status_failed: "Failed",
+    review_failed_banks: "The connection with {{banks}} failed. The results are based on your other banks only.",
     progress_header: "Analysing transactions",
     progress_explanation: "This usually takes less than a minute. Please keep this page open.",
     step_consent: "Bank account connected",
@@ -42,6 +52,7 @@ const en = {
     error_timeout: "Retrieving your transactions took too long. Please try again later.",
     error_enablenow: "The bank data service is unavailable. Please try again later.",
     error_no_consent: "The bank connection was not completed.",
+    error_too_many_banks: "You have connected the maximum number of banks.",
 
     done_header: "Cards added",
     thank_you: "Thank you for using Yivi, you can close this page now.",
@@ -250,7 +261,7 @@ type Translations = typeof en;
 
 const nl: Translations = {
     index_header: "Financiële gegevens toevoegen",
-    index_explanation: "Bewijs feiten over je financiën met Yivi, zonder je bankafschriften af te geven. Koppel eenmalig je bankrekening; wij analyseren je transacties van de afgelopen 12 maanden en jij kiest welke van de volgende kaartjes je aan je Yivi-app toevoegt.",
+    index_explanation: "Bewijs feiten over je financiën met Yivi, zonder je bankafschriften af te geven. Koppel eenmalig je bankrekeningen, bij één of meer banken; wij analyseren je transacties van de afgelopen 12 maanden en jij kiest welke van de volgende kaartjes je aan je Yivi-app toevoegt.",
     index_privacy: "De koppeling met je bank loopt via enablenow, een vergunde rekeninginformatiedienst. Na de analyse worden de koppeling en je transacties verwijderd; alleen de kaartjes die je toevoegt blijven bewaard, in je eigen Yivi-app.",
     index_start: "Bank koppelen",
     back: "Terug",
@@ -258,6 +269,16 @@ const nl: Translations = {
 
 
     callback_header: "Bank gekoppeld",
+    banks_header: "Je banken",
+    banks_explanation: "Bankier je ook ergens anders, bijvoorbeeld je salaris bij de ene bank en je vaste lasten bij de andere? Koppel die bank dan ook, zodat de analyse al je inkomsten en uitgaven omvat. Overboekingen tussen je eigen rekeningen tellen niet mee.",
+    banks_add: "Nog een bank koppelen",
+    banks_continue: "Doorgaan",
+    banks_max: "Je kunt maximaal {{max}} banken koppelen.",
+    banks_not_connected: "De laatste bank is niet gekoppeld. Je kunt het opnieuw proberen of doorgaan met de banken hieronder.",
+    bank_status_pending: "Gekoppeld",
+    bank_status_ready: "Transacties opgehaald",
+    bank_status_failed: "Mislukt",
+    review_failed_banks: "De koppeling met {{banks}} is mislukt. De resultaten zijn alleen gebaseerd op je andere banken.",
     progress_header: "Transacties analyseren",
     progress_explanation: "Dit duurt meestal minder dan een minuut. Houd deze pagina open.",
     step_consent: "Bankrekening gekoppeld",
@@ -288,6 +309,7 @@ const nl: Translations = {
     error_timeout: "Het ophalen van je transacties duurde te lang. Probeer het later opnieuw.",
     error_enablenow: "De bankgegevensdienst is niet beschikbaar. Probeer het later opnieuw.",
     error_no_consent: "De bankkoppeling is niet afgerond.",
+    error_too_many_banks: "Je hebt het maximale aantal banken gekoppeld.",
 
     done_header: "Kaartjes toegevoegd",
     thank_you: "Bedankt voor het gebruiken van Yivi, je kunt deze pagina nu sluiten.",

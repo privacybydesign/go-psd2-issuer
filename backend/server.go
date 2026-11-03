@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -41,6 +42,8 @@ const ErrorBadRequest = "error:bad-request"
 const ErrorSessionNotFound = "error:session-not-found"
 const ErrorInvalidState = "error:invalid-state"
 const ErrorNotReady = "error:not-ready"
+const ErrorTooManyBanks = "error:too-many-banks"
+const ErrorNoConsent = "error:no-consent"
 
 type ServerConfig struct {
 	Host           string `json:"host"`
@@ -145,6 +148,12 @@ func NewServer(state *ServerState, config ServerConfig) (*Server, error) {
 	router.HandleFunc("/api/session/consent", func(w http.ResponseWriter, r *http.Request) {
 		handleConsent(state, w, r)
 	}).Methods(http.MethodPost)
+	router.HandleFunc("/api/session/add-bank", func(w http.ResponseWriter, r *http.Request) {
+		handleAddBank(state, w, r)
+	}).Methods(http.MethodPost)
+	router.HandleFunc("/api/session/finish", func(w http.ResponseWriter, r *http.Request) {
+		handleFinish(state, w, r)
+	}).Methods(http.MethodPost)
 	router.HandleFunc("/api/session/status", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(state, w, r)
 	}).Methods(http.MethodGet)
@@ -193,8 +202,9 @@ type StartResponse struct {
 	Url string `json:"url"`
 }
 
-// handleStart creates a new session and returns the AppScreen URL. The session
-// id is stored in a cookie; the state travels through the AppScreen.
+// handleStart creates a new session with an enablenow user and returns the
+// AppScreen URL. The session id is stored in a cookie; the state travels
+// through the AppScreen.
 func handleStart(state *ServerState, w http.ResponseWriter, r *http.Request) {
 	endpoint := r.URL.Path
 	ip := getIpAddressForRequest(r, state.trustedProxies)
@@ -216,7 +226,17 @@ func handleStart(state *ServerState, w http.ResponseWriter, r *http.Request) {
 	}
 
 	session := NewSession(time.Now())
+	// every bank the user connects is linked to this user, so they can be
+	// categorized together; the external id is random, never personal data
+	user, err := state.enablenow.CreateUser(r.Context(), rand.Text())
+	if err != nil {
+		respondWithErr(w, http.StatusBadGateway, ErrorEnablenow, "failed to create enablenow user", err, "endpoint", endpoint)
+		return
+	}
+	session.UserId = user.Id
+	session.ExternalUserId = user.ExternalUserId
 	if err := state.sessionStorage.Put(session); err != nil {
+		state.flow.cleanup(r.Context(), session)
 		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to store session", err, "endpoint", endpoint)
 		return
 	}
@@ -231,11 +251,65 @@ func handleStart(state *ServerState, w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	// The AppScreen forwards query parameters of the redirect URI back to it,
-	// so the state travels inside the redirect URI.
+	writeJson(w, http.StatusOK, StartResponse{Url: consentURL(state, session)})
+}
+
+// consentURL returns the AppScreen URL that links a bank to the session's
+// enablenow user. The AppScreen forwards query parameters of the redirect URI
+// back to it, so the state travels inside the redirect URI.
+func consentURL(state *ServerState, session *Session) string {
 	redirectURI := strings.TrimRight(state.publicURL, "/") + "/callback?" + url.Values{"state": {session.State}}.Encode()
-	consentURL := state.enablenow.ConsentURL(redirectURI, nil)
-	writeJson(w, http.StatusOK, StartResponse{Url: consentURL})
+	return state.enablenow.ConsentURL(redirectURI, url.Values{"user_id": {session.UserId}})
+}
+
+// handleAddBank returns the AppScreen URL to connect another bank.
+func handleAddBank(state *ServerState, w http.ResponseWriter, r *http.Request) {
+	endpoint := r.URL.Path
+	ip := getIpAddressForRequest(r, state.trustedProxies)
+	logReceivedRequest(r, ip)
+
+	session, ok := sessionFromRequest(state, w, r)
+	if !ok {
+		return
+	}
+	if session.Status != StatusAwaitingConsent {
+		respondWithErr(w, http.StatusConflict, ErrorInvalidState, "session is done connecting banks", nil, "endpoint", endpoint, "status", session.Status)
+		return
+	}
+	if len(session.Consents) >= MaxBanks {
+		respondWithErr(w, http.StatusConflict, ErrorTooManyBanks, "too many banks", nil, "endpoint", endpoint)
+		return
+	}
+	writeJson(w, http.StatusOK, StartResponse{Url: consentURL(state, session)})
+}
+
+// handleFinish ends connecting banks and starts fetching the transactions.
+func handleFinish(state *ServerState, w http.ResponseWriter, r *http.Request) {
+	endpoint := r.URL.Path
+	ip := getIpAddressForRequest(r, state.trustedProxies)
+	logReceivedRequest(r, ip)
+
+	session, ok := sessionFromRequest(state, w, r)
+	if !ok {
+		return
+	}
+	// finishing twice (e.g. a double click) is fine
+	if session.Status != StatusAwaitingConsent {
+		writeJson(w, http.StatusOK, statusResponse(session))
+		return
+	}
+	if len(session.Consents) == 0 {
+		respondWithErr(w, http.StatusConflict, ErrorNoConsent, "no bank connected", nil, "endpoint", endpoint)
+		return
+	}
+
+	session.setStatus(StatusAwaitingTransactions, time.Now())
+	if err := state.sessionStorage.Put(session); err != nil {
+		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to store session", err, "endpoint", endpoint)
+		return
+	}
+	slog.Info("done connecting banks", "banks", len(session.Consents))
+	writeJson(w, http.StatusOK, statusResponse(session))
 }
 
 type ConsentPayload struct {
@@ -243,8 +317,9 @@ type ConsentPayload struct {
 	State     string `json:"state"`
 }
 
-// handleConsent attaches the consent id enablenow redirected back with to the
-// session, after checking the state matches the one we handed out.
+// handleConsent adds the consent id enablenow redirected back with to the
+// session, after checking the state matches the one we handed out. The user
+// then connects another bank or finishes.
 func handleConsent(state *ServerState, w http.ResponseWriter, r *http.Request) {
 	endpoint := r.URL.Path
 	ip := getIpAddressForRequest(r, state.trustedProxies)
@@ -265,19 +340,29 @@ func handleConsent(state *ServerState, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// the same consent may be posted twice (e.g. a page reload); a different
-	// one is not allowed to replace it
+	// the same consent may be posted twice (e.g. a page reload)
+	if session.hasConsent(body.ConsentId) {
+		writeJson(w, http.StatusOK, statusResponse(session))
+		return
+	}
 	if session.Status != StatusAwaitingConsent {
-		if session.ConsentId == body.ConsentId {
-			writeJson(w, http.StatusOK, statusResponse(session))
-			return
-		}
-		respondWithErr(w, http.StatusConflict, ErrorInvalidState, "session already has a consent", nil, "endpoint", endpoint)
+		respondWithErr(w, http.StatusConflict, ErrorInvalidState, "session is done connecting banks", nil, "endpoint", endpoint)
+		return
+	}
+	if len(session.Consents) >= MaxBanks {
+		respondWithErr(w, http.StatusConflict, ErrorTooManyBanks, "too many banks", nil, "endpoint", endpoint)
 		return
 	}
 
-	session.ConsentId = body.ConsentId
-	session.setStatus(StatusAwaitingTransactions, time.Now())
+	// the bank is shown to the user; the flow fills it in when this fails
+	providerKey := ""
+	if consent, err := state.enablenow.GetConsent(r.Context(), body.ConsentId); err == nil {
+		providerKey = consent.ProviderKey
+	} else {
+		slog.Warn("failed to look up consent", "error", err, "consent", logging.MaskIdentifier(body.ConsentId))
+	}
+
+	session.Consents = append(session.Consents, SessionConsent{Id: body.ConsentId, ProviderKey: providerKey, Status: ConsentPending})
 	if err := state.sessionStorage.Put(session); err != nil {
 		respondWithErr(w, http.StatusInternalServerError, ErrorInternal, "failed to store session", err, "endpoint", endpoint)
 		return
@@ -289,13 +374,31 @@ func handleConsent(state *ServerState, w http.ResponseWriter, r *http.Request) {
 type StatusResponse struct {
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`
+	// Banks lists the connected banks in the order they were connected.
+	Banks []BankStatus `json:"banks,omitempty"`
 	// Credentials holds the computed values once the status is ready, so
 	// the user can review them before adding them to Yivi.
 	Credentials []credentials.Credential `json:"credentials,omitempty"`
 }
 
+// BankStatus is a connected bank as shown to the user.
+type BankStatus struct {
+	// Provider is the enablenow provider key, e.g. RABONL2U.
+	Provider string `json:"provider"`
+	// Status is pending, ready or failed.
+	Status string `json:"status"`
+}
+
 func statusResponse(s *Session) StatusResponse {
-	return StatusResponse{Status: s.Status, Error: s.Error, Credentials: s.Credentials}
+	response := StatusResponse{Status: s.Status, Error: s.Error, Credentials: s.Credentials}
+	for _, c := range s.Consents {
+		// a bank that was connected again is shown once
+		if c.Status == ConsentReplaced {
+			continue
+		}
+		response.Banks = append(response.Banks, BankStatus{Provider: c.ProviderKey, Status: c.Status})
+	}
+	return response
 }
 
 // handleStatus advances the session as far as possible and reports where it is.
@@ -372,7 +475,7 @@ func handleIssue(state *ServerState, w http.ResponseWriter, r *http.Request) {
 	writeJson(w, http.StatusOK, IssueResponse{Jwt: jwt, IrmaServerURL: state.irmaServerURL})
 }
 
-// handleDelete forgets the session and deletes its consent at enablenow.
+// handleDelete forgets the session and deletes its enablenow user.
 func handleDelete(state *ServerState, w http.ResponseWriter, r *http.Request) {
 	if id := sessionIdFromCookie(r); id != "" {
 		deleteSession(r.Context(), state, id)
@@ -394,8 +497,9 @@ func deleteSession(ctx context.Context, state *ServerState, id string) {
 	if err != nil {
 		return
 	}
-	if session.ConsentId != "" && session.Status != StatusReady && session.Status != StatusFailed {
-		// the consent is only still around while the flow is in progress
+	if session.Status != StatusReady && session.Status != StatusFailed {
+		// the enablenow user is only still around while the flow is in
+		// progress
 		state.flow.cleanup(ctx, session)
 	}
 	if err := state.sessionStorage.Delete(id); err != nil {
