@@ -20,6 +20,7 @@ func NewIrmaJwtCreator(privateKeyPath string,
 	issuerId string,
 	credentialIds map[string]string,
 	validity time.Duration,
+	sdJwtBatchSize uint,
 ) (*DefaultJwtCreator, error) {
 	keyBytes, err := os.ReadFile(privateKeyPath)
 	if err != nil {
@@ -32,11 +33,12 @@ func NewIrmaJwtCreator(privateKeyPath string,
 	}
 
 	return &DefaultJwtCreator{
-		issuerId:      issuerId,
-		privateKey:    privateKey,
-		credentialIds: credentialIds,
-		validity:      validity,
-		now:           time.Now,
+		issuerId:       issuerId,
+		privateKey:     privateKey,
+		credentialIds:  credentialIds,
+		validity:       validity,
+		sdJwtBatchSize: sdJwtBatchSize,
+		now:            time.Now,
 	}, nil
 }
 
@@ -44,10 +46,13 @@ type DefaultJwtCreator struct {
 	privateKey *rsa.PrivateKey
 	issuerId   string
 	// credentialIds maps a credential key (e.g. "income") to the full Yivi
-	// credential type id (e.g. "irma-demo.enablenow.income").
+	// credential type id (e.g. "pbdf-staging.pbdf.income").
 	credentialIds map[string]string
 	validity      time.Duration
-	now           func() time.Time
+	// sdJwtBatchSize is how many SD-JWTs the IRMA server issues per
+	// credential; 0 means none, only the IRMA credential.
+	sdJwtBatchSize uint
+	now            func() time.Time
 }
 
 func (jc *DefaultJwtCreator) CreateJwt(creds []credentials.Credential) (string, error) {
@@ -69,7 +74,7 @@ func (jc *DefaultJwtCreator) CreateJwt(creds []credentials.Credential) (string, 
 			CredentialTypeID: irma.NewCredentialTypeIdentifier(id),
 			Attributes:       cred.Attributes,
 			Validity:         &validity,
-			SdJwtBatchSize:   200,
+			SdJwtBatchSize:   jc.sdJwtBatchSize,
 		})
 	}
 

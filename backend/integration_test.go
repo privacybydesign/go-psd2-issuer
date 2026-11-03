@@ -36,9 +36,9 @@ func newTestEnv(t *testing.T) *testEnv {
 
 	ids := map[string]string{}
 	for _, key := range credentials.AllKeys {
-		ids[key] = "irma-demo.enablenow." + key
+		ids[key] = "pbdf-staging.pbdf." + key
 	}
-	jwtCreator, err := NewIrmaJwtCreator("../test-secrets/priv.pem", "psd2_issuer", ids, 90*24*time.Hour)
+	jwtCreator, err := NewIrmaJwtCreator("../test-secrets/priv.pem", "psd2_issuer", ids, 90*24*time.Hour, 0)
 	require.NoError(t, err)
 
 	storage := NewInMemorySessionStorage()
@@ -203,12 +203,12 @@ func TestFullIssuanceFlow(t *testing.T) {
 
 	creds := issuedCredentials(t, issue.Jwt)
 	require.Len(t, creds, 3) // income + two bank accounts
-	require.Equal(t, "irma-demo.enablenow.income", creds[0].Credential)
+	require.Equal(t, "pbdf-staging.pbdf.income", creds[0].Credential)
 	require.Equal(t, "3220", creds[0].Attributes["salary"])
 	require.NotNil(t, creds[0].Validity)
-	require.Equal(t, "irma-demo.enablenow.bankaccount", creds[1].Credential)
+	require.Equal(t, "pbdf-staging.pbdf.bankaccount", creds[1].Credential)
 	require.Equal(t, "NL91ABNA0417164300", creds[1].Attributes["iban"])
-	require.Equal(t, "irma-demo.enablenow.bankaccount", creds[2].Credential)
+	require.Equal(t, "pbdf-staging.pbdf.bankaccount", creds[2].Credential)
 }
 
 func TestDefinitions(t *testing.T) {
