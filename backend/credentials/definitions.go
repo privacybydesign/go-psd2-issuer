@@ -8,8 +8,7 @@ import (
 
 // DefinitionsJSON is the single source of truth for the credentials: one
 // credential per E1 top-level group, with one attribute per E1 category code.
-// scheme/generate.py reads the same file, and the frontend gets it from
-// GET /api/definitions.
+// The frontend gets it from GET /api/definitions.
 //
 //go:embed definitions.json
 var DefinitionsJSON []byte
