@@ -18,13 +18,11 @@ monthly averages), plus bankaccount. Modeled on go-sms-issuer.
 ## Layout
 
 - `backend/credentials/definitions.json`: single source of truth for all
-  credentials and attributes (with en/nl texts). The backend embeds it,
-  `scheme/generate.py` reads it, the frontend fetches it from
-  `/api/definitions`. The credentials live in the shared `pbdf` issuer of the
-  pbdf-staging scheme (`pbdf-staging.pbdf.<key>`). After changing it,
-  regenerate `scheme/` (and the copy in pbdf-staging, which then needs
-  re-signing); `scheme_test.go` checks the backend and scheme agree. The
-  generator never touches the issuer, logos or other pbdf credentials.
+  credentials and attributes (with en/nl texts). The backend embeds it and
+  the frontend fetches it from `/api/definitions`. The credentials live in
+  the shared `pbdf` issuer of the pbdf-staging scheme
+  (`pbdf-staging.pbdf.<key>`). After changing it, update the matching
+  `description.xml` files in pbdf-staging, which then needs re-signing.
 - `backend/enablenow/`: API client (`HttpClient`) and `FakeClient`.
 - `backend/flow.go`: poll-driven state machine; no background goroutines.
 - `backend/rules/` + `backend/verifier.go`: demo verifier. Each law in
