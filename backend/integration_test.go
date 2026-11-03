@@ -37,7 +37,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	for _, key := range credentials.AllKeys {
 		ids[key] = "pbdf-staging.pbdf." + key
 	}
-	jwtCreator, err := NewIrmaJwtCreator("../test-secrets/priv.pem", "psd2_issuer", ids, 90*24*time.Hour)
+	jwtCreator, err := NewIrmaJwtCreator("../test-secrets/priv.pem", "psd2_issuer", ids, 90*24*time.Hour, 50)
 	require.NoError(t, err)
 
 	storage := NewInMemorySessionStorage()
