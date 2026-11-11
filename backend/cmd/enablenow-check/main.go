@@ -58,7 +58,7 @@ func run(configPath, consentId string) error {
 	}
 	fmt.Printf("consent: status=%s provider=%s has_transactions=%v\n", consent.Status, consent.ProviderKey, consent.HasTransactions())
 
-	jobs, err := client.ListCategorizationJobs(ctx, consentId)
+	jobs, err := client.ListCategorizationJobs(ctx, enablenow.JobFilter{ConsentId: consentId})
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
 	}
@@ -114,7 +114,7 @@ func run(configPath, consentId string) error {
 	}
 	fmt.Printf("accounts: %d\n", len(accounts))
 
-	for _, c := range credentials.Compute(accounts, txs, consent.ProviderKey, opts) {
+	for _, c := range credentials.Compute([]credentials.Bank{{ProviderKey: consent.ProviderKey, Accounts: accounts, Transactions: txs}}, opts) {
 		out, _ := json.Marshal(c.Attributes)
 		fmt.Printf("%s: %s\n", c.Key, out)
 	}

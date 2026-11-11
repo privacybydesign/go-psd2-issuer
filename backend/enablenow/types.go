@@ -121,11 +121,27 @@ func (t *Transaction) Date() (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// JobRequest creates a categorization job over either one consent or all
+// consents of a user.
 type JobRequest struct {
-	Engine      string `json:"engine"`
-	Profile     string `json:"profile"`
-	CountryCode string `json:"countryCode,omitempty"`
-	ConsentId   string `json:"consentId"`
+	Engine      string       `json:"engine"`
+	Profile     string       `json:"profile"`
+	CountryCode string       `json:"countryCode,omitempty"`
+	ConsentId   string       `json:"consentId,omitempty"`
+	UserId      string       `json:"userId,omitempty"`
+	MetaData    *JobMetaData `json:"metaData,omitempty"`
+}
+
+type JobMetaData struct {
+	// InternalIbans are the user's own accounts, so transfers between them
+	// are not mistaken for income or expenses.
+	InternalIbans []string `json:"internal_ibans,omitempty"`
+}
+
+// JobFilter selects the categorization jobs of a consent or of a user.
+type JobFilter struct {
+	ConsentId      string
+	ExternalUserId string
 }
 
 type Job struct {
@@ -136,4 +152,13 @@ type Job struct {
 	CountryCode   string `json:"countryCode"`
 	EngineVersion string `json:"engineVersion"`
 	ConsentId     string `json:"consentId"`
+	UserId        string `json:"userId"`
+}
+
+// User groups the consents of one end-user, so the accounts of several banks
+// can be categorized together.
+// https://docs.enablenow.nl/account-information/data-access/user-based-access
+type User struct {
+	Id             string `json:"id"`
+	ExternalUserId string `json:"externalUserId"`
 }

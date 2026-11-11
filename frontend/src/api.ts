@@ -38,6 +38,14 @@ export const startSession = () =>
 export const submitConsent = (consentId: string, state: string) =>
   request<StatusResponse>('POST', '/api/session/consent', { consent_id: consentId, state });
 
+// addBank returns the AppScreen URL to connect another bank.
+export const addBank = () =>
+  request<{ url: string }>('POST', '/api/session/add-bank', {});
+
+// finishConnecting ends connecting banks and starts the analysis.
+export const finishConnecting = () =>
+  request<StatusResponse>('POST', '/api/session/finish', {});
+
 export const getStatus = () =>
   request<StatusResponse>('GET', '/api/session/status');
 
